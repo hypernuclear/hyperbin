@@ -16,9 +16,28 @@ decisions and `docs/battery.md` for the power budget.
 ## Build
 
 ```sh
-cmake -B build -DCMAKE_PREFIX_PATH=~/Qt/6.11.1/macos
-cmake --build build
+sh scripts/install-hooks.sh          # once per clone — see Secrets below
+export QT_ROOT=~/Qt/6.11.1/macos     # or use CMakeUserPresets.json
+cmake --preset dev && cmake --build --preset dev
 ```
+
+Qt's location is never committed. `CMakePresets.json` reads it from
+`QT_ROOT`; to pin it per machine instead, create a `CMakeUserPresets.json`
+(git-ignored) inheriting `dev` and setting `CMAKE_PREFIX_PATH`.
+
+## Secrets
+
+This repo is public. `gitleaks` runs in two places:
+
+- **Pre-commit hook** (`.githooks/pre-commit`) — the one that actually
+  prevents a leak, since CI only fires after a push has already made the
+  secret public. Enable per clone with `scripts/install-hooks.sh`.
+- **CI** (`.github/workflows/secret-scan.yml`) — full history on every
+  PR, plus weekly, so secrets missed by an older ruleset still surface.
+
+If something is caught, **rotate the credential first**. Removing it from
+the diff does nothing for a value that was already pushed — it stays in
+the history and must be treated as compromised.
 
 ## Testing
 

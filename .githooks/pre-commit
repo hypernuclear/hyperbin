@@ -1,0 +1,29 @@
+#!/bin/sh
+# Block commits containing secrets. Install with scripts/install-hooks.sh.
+#
+# CI catches these too, but by then a push has already made the secret
+# public — on a public repo, "caught in CI" is too late. This is the
+# stage that actually prevents the leak.
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "pre-commit: gitleaks not installed, skipping secret scan."
+    echo "            brew install gitleaks"
+    exit 0
+fi
+
+# --staged scans exactly what's about to be committed, not the worktree.
+if ! gitleaks protect --staged --redact --config .gitleaks.toml --verbose; then
+    cat <<'EOF'
+
+pre-commit: BLOCKED — a secret was found in the staged changes.
+
+Do not just remove it and re-commit: if it was ever pushed, it stays in
+the history and must be treated as compromised. Rotate the credential
+first, then remove it from the diff.
+
+To commit anyway (only for a verified false positive, and please add it
+to the allowlist in .gitleaks.toml):
+    git commit --no-verify
+EOF
+    exit 1
+fi

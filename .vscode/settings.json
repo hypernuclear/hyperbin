@@ -1,15 +1,11 @@
 {
+  // No machine-specific paths here — Qt's location lives in
+  // CMakeUserPresets.json, which is git-ignored. See CMakePresets.json.
+  "cmake.useCMakePresets": "always",
   "cmake.configureOnOpen": true,
   "cmake.buildBeforeRun": true,
-  // Qt isn't in a default search path, so CMake Tools can't configure
-  // (and ${command:cmake.launchTargetPath} can't resolve) without this.
-  "cmake.configureArgs": [
-    "-DCMAKE_PREFIX_PATH=/Users/leo/Qt/6.11.1/macos",
-    "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
-  ],
-  "C_Cpp.default.compilerPath": "/usr/bin/clang++",
-  "C_Cpp.default.cppStandard": "c++20",
   "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+  "C_Cpp.default.cppStandard": "c++20",
   "C_Cpp.errorSquiggles": "enabled",
   "C_Cpp.files.exclude": {
     "${workspaceFolder}/build": true

@@ -168,7 +168,11 @@ void FlySim::spawnFly()
     f.life        = rndRange(params.lifeMin, params.lifeMax);
     f.fade        = 0.0f;
     f.leaving     = false;
-    f.inFront     = rnd() < params.frontShare;
+    // Spawns start outside the icon heading away from it, so they begin
+    // in front; the first turn back toward the bin is what decides
+    // whether this one passes behind it.
+    f.inFront     = true;
+    f.wasToward   = false;
     enterMode(f, FlyMode::Flying);
     // Decide about landing at birth, not only when the first flying leg
     // expires. Lifetimes (2-6s) overlap the flying-leg length, so most
@@ -285,6 +289,49 @@ void FlySim::step(float dt)
 
         const bool crawling = !f.leaving && f.mode == FlyMode::Crawling && overBin;
         f.onSurface = crawling;
+        // Depth. A fly may only be behind the bin if it is heading toward
+        // it: one flying outward from the middle has nothing left to be
+        // occluded by, and masking it on the way out read as it being
+        // swallowed. Re-decided only while clear of the icon, and only on
+        // the toward/away transition, so nothing flickers or pops.
+        if (!overBin && !crawling) {
+            const QPointF toC = c - f.pos;
+            const bool toward = QPointF::dotProduct(f.vel, toC) > 0.0;
+            if (toward != f.wasToward) {
+                f.wasToward = toward;
+                f.inFront   = toward ? (rnd() < params.frontShare) : true;
+            }
+        }
+        // --- startle ---------------------------------------------------
+        // A crawler occasionally freezes, holds for a beat, then bolts.
+        if (crawling && !f.leaving && f.freezeLeft <= 0.0f && !f.bolting
+            && rnd() < params.startleChance)
+            f.freezeLeft = rndRange(params.freezeMin, params.freezeMax);
+        bool frozen = false;
+        if (f.freezeLeft > 0.0f) {
+            f.freezeLeft -= dt;
+            frozen = f.freezeLeft > 0.0f;
+            if (!frozen) {
+                // Bolt: straight out from the bin, biased upward, and
+                // fast enough that the takeoff reads as a single event
+                // rather than as the fly resuming its wander.
+                QPointF out = f.pos - c;
+                const float od = float(std::hypot(out.x(), out.y()));
+                out = od > 0.001f ? out / od : QPointF(0, -1);
+                out.ry() -= 1.8f;   // strongly upward: sideways bolts ran into the horizontal margin
+                const float ol = float(std::hypot(out.x(), out.y()));
+                if (ol > 0.001f) out /= ol;
+                enterMode(f, FlyMode::Flying);
+                f.bolting     = true;
+                f.seekingLand = false;
+                f.dir         = out;
+                f.vel         = out * params.flySpeed * k * params.boltSpeed;
+                // It doesn't come back. Departing is the point of the
+                // manoeuvre, and a fly that bolted and then resumed
+                // pottering about would undo it.
+                f.life        = std::min(f.life, params.boltFor);
+            }
+        }
         // Crawling pace wanders, and spends real time near a standstill.
         // A crawler at one constant speed reads as a machine tracking a
         // path; the stop-and-go is most of what sells it as an insect.
@@ -305,6 +352,13 @@ void FlySim::step(float dt)
         const float cruise = speedMax;
         if (crawling)
             speedMax *= f.pace;
+        if (frozen)
+            speedMax = 0.0f;
+        // A bolting fly keeps its speed up. Without this the very next
+        // frame clamps it back to the normal cruise limit and the burst
+        // never actually happens.
+        if (f.bolting && !frozen)
+            speedMax *= params.boltSpeed * 0.8f;
         // A flier passing over the bin throttles back — hovering over the
         // thing it cares about, rather than treating it as scenery.
         if (!crawling && !f.leaving && overBin)
@@ -431,7 +485,7 @@ void FlySim::step(float dt)
         // Twitches: a crawler makes quick sideways corrections, a flier
         // occasionally darts.
         if (crawling) {
-            if (rnd() < params.jitterChance) {
+            if (!frozen && rnd() < params.jitterChance) {
                 const float side = rnd() < 0.5f ? -1.0f : 1.0f;
                 f.vel += QPointF(side, rndRange(-0.25f, 0.25f))
                          * params.jitterImpulse * k;
@@ -440,6 +494,8 @@ void FlySim::step(float dt)
             f.vel += QPointF(rndRange(-1, 1), rndRange(-1, 1))
                      * params.dartImpulse * k;
         }
+        if (frozen)
+            f.vel = QPointF(0, 0);
         f.vel = limit(f.vel, speedMax * 1.6f);
         // Fliers always cruise. Steering terms can cancel — an outward
         // push against the containment shove, a seek against the curl —
@@ -448,7 +504,7 @@ void FlySim::step(float dt)
         // Real flies don't hover in place; enforcing a floor along the
         // current heading removes the whole failure mode rather than
         // chasing the individual pairs of terms that cause it.
-        if (!crawling) {
+        if (!crawling && !frozen) {
             const float sp = float(std::hypot(f.vel.x(), f.vel.y()));
             const float floorSp = speedMax * 0.45f;
             if (sp < floorSp) {
@@ -487,7 +543,9 @@ void FlySim::step(float dt)
             f.wanderAngle += std::clamp(d, -maxTurn, maxTurn);
         }
         // Crawling flies beat their wings far less.
-        f.phase += dt * (crawling ? 9.0f : 40.0f);
+        // Wings stop dead during the freeze. A fly holding still with its
+        // wings still going would look like a rendering glitch.
+        f.phase += frozen ? 0.0f : dt * (crawling ? 9.0f : 40.0f);
     }
 
     // Retire faded-out flies. Culling on fade alone (rather than on

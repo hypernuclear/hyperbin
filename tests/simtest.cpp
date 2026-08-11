@@ -167,6 +167,27 @@ int main()
         std::printf("occluded flies under the bin: %d\n", under);
         if (under > 0) return fail("flies pass under the bin, through the Dock floor");
     }
+    // --- passes across the FRONT of the bin --------------------------
+    // Depth is only re-decided while a fly is clear of the icon and only
+    // for flies heading toward it, so it is easy for this to collapse
+    // without anyone noticing in the params.
+    {
+        const qreal side = 40.0;
+        const QRectF bin(500, 500, side, side * 0.7);
+        FlySim s = makeSim(side, 1.0f, 5150);
+        int over = 0, inFront = 0;
+        for (int i = 0; i < 2400; ++i) {
+            s.step(0.05f);
+            for (const Fly &f : s.flies()) {
+                if (f.onSurface || !bin.contains(f.pos)) continue;
+                ++over;
+                if (f.inFront) ++inFront;
+            }
+        }
+        const double share = double(inFront) / std::max(1, over);
+        std::printf("flights across the bin: %.0f%% in front\n", share * 100);
+        if (share < 0.35) return fail("almost nothing flies in front of the bin");
+    }
     // --- containment: must fit the asymmetric overlay margins ---
     for (qreal side : {28.0, 40.0, 95.0}) {
         FlySim s = makeSim(side, 1.0f, 4242);

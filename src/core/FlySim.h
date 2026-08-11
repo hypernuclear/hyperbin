@@ -45,9 +45,15 @@ struct Fly
     float   fade     = 0.0f; // 0-1 opacity, ramps on arrival and departure
     bool    leaving  = false;
 
-    /// Half the swarm passes in front of the bin rather than behind it.
-    /// Fixed per fly: a fly that swapped depth mid-flight would pop.
+    /// Whether this fly draws in front of the bin rather than behind it.
+    /// Only ever changed while the fly is clear of the icon — swapping
+    /// depth on top of it would pop — and only a fly heading TOWARD the
+    /// bin is allowed behind. A fly leaving the middle of the bin has
+    /// nothing to go behind, so being masked on the way out looked wrong.
     bool    inFront  = false;
+    /// Last known approach direction, so depth is re-decided on the
+    /// transition rather than re-rolled every frame.
+    bool    wasToward = false;
     /// Heading for the bin to land on it. Without this a fly could only
     /// land if its timer happened to expire while it was already over the
     /// bin — and once fliers were given a wider berth, that almost never
@@ -62,6 +68,11 @@ struct Fly
     /// at one steady speed reads as a machine; real ones surge and stall.
     float   pace     = 1.0f;
     float   paceLeft = 0.0f;
+    /// Startle: a crawler freezes dead still, then bolts off the bin.
+    /// The stillness is the whole effect — it only reads as alarm because
+    /// everything else on screen is in constant motion.
+    float   freezeLeft = 0.0f;
+    bool    bolting    = false;
 
     /// Actually crawling ON the bin this frame. The renderer clips
     /// these to the silhouette rather than occluding them.
@@ -155,14 +166,14 @@ public:
         // Flying is the default state; crawling is a brief visit. The
         // previous split had them settling almost as often as flying,
         // which read as a swarm that had given up.
-        float crawlMin       = 0.4f;   // seconds spent in each mode
-        float crawlMax       = 1.7f;
-        float flyMin         = 2.2f;
-        float flyMax         = 4.5f;
+        float crawlMin       = 0.7f;   // seconds spent in each mode
+        float crawlMax       = 2.8f;
+        float flyMin         = 1.8f;
+        float flyMax         = 3.6f;
 
         /// Chance of actually settling when a flier passes over the bin
         /// with its timer up. Below 1 so most passes stay airborne.
-        float landChance     = 0.5f;
+        float landChance     = 0.78f;
 
         // Crawling twitches: infrequent and small. At the previous rate
         // (0.12 / 26px) a crawling fly was in near-constant spasm rather
@@ -189,10 +200,17 @@ public:
         float friction       = 3.4f;   // velocity damping, 1/sec
 
         float separation     = 6.0f;   // px, personal space
+        // Startle. Chance is per crawling fly per step, so at 60fps a
+        // crawler is startled roughly every 8 seconds of crawling.
+        float startleChance  = 0.002f;
+        float freezeMin      = 0.35f;  // seconds held dead still
+        float freezeMax      = 1.10f;
+        float boltSpeed      = 2.1f;   // multiple of normal flying speed
+        float boltFor        = 0.9f;   // seconds before it leaves for good
         float dartChance     = 0.005f; // per flying fly per step
         float dartImpulse    = 24.0f;
         float easeRate       = 0.9f;   // fullness lerp per sec
-        float frontShare     = 0.25f;  // fraction passing in front of the bin
+        float frontShare     = 0.62f;  // fraction passing in front of the bin
         /// Fliers throttle back while over the bin — they slow to look
         /// at it rather than barrelling straight past.
         float overBinSlow    = 0.6f;

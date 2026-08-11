@@ -1,106 +1,166 @@
-// Headless sanity check for the swarm: does it populate, move, stay
-// near the bin, and fully disperse when the bin is emptied?
+// Headless checks for the swarm's contract: how many flies, how long
+// they live, where they're allowed to go, and that it all stops.
 #include "FlySim.h"
 
 #include <QRectF>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
 using namespace hyperbin;
 
+namespace {
+
+int fail(const char *msg)
+{
+    std::printf("FAIL: %s\n", msg);
+    return 1;
+}
+
+FlySim makeSim(qreal side, float fullness, uint32_t seed = 12345)
+{
+    FlySim s(seed);
+    s.setBinRect(QRectF(500, 500, side, side * 0.7)); // Dock tiles are wide
+    s.setFullness(fullness);
+    return s;
+}
+
+} // namespace
+
 int main()
 {
-    FlySim s(12345);
-    s.setBinRect(QRectF(78, 78, 64, 64));
-
-    s.setFullness(1.0f);
-    for (int i = 0; i < 200; ++i)
-        s.step(0.05f);
-
-    const int n = s.flies().size();
-    std::printf("full: %d flies after 10s\n", n);
-    if (n < 8) { std::printf("FAIL: swarm too small\n"); return 1; }
-
-    double sp = 0;
-    QRectF bb;
-    for (const Fly &f : s.flies()) {
-        sp += std::hypot(f.vel.x(), f.vel.y());
-        const QRectF r(f.pos, QSizeF(1, 1));
-        bb = bb.isNull() ? r : bb.united(r);
-    }
-    sp /= n;
-    std::printf("mean speed %.1f px/s | bbox %.0fx%.0f at (%.0f,%.0f)\n",
-                sp, bb.width(), bb.height(), bb.center().x(), bb.center().y());
-    if (sp < 5.0) { std::printf("FAIL: flies are not moving\n"); return 1; }
-    if (bb.width() > 300 || bb.height() > 300) {
-        std::printf("FAIL: swarm dispersed, should orbit the bin\n"); return 1;
-    }
-
-    // Determinism: same seed must reproduce the same flight path.
-    FlySim s2(12345);
-    s2.setBinRect(QRectF(78, 78, 64, 64));
-    s2.setFullness(1.0f);
-    for (int i = 0; i < 200; ++i)
-        s2.step(0.05f);
-    if (s2.flies().size() != n || s2.flies()[0].pos != s.flies()[0].pos) {
-        std::printf("FAIL: not deterministic for a fixed seed\n"); return 1;
-    }
-    std::printf("deterministic: same seed reproduces the swarm\n");
-
-    // The swarm must scale with the icon: Dock magnification grows the
-    // tile from 26pt to 95pt here, and a fixed orbit radius would leave
-    // the flies buried inside a magnified bin.
-    auto meanOrbit = [](qreal side) {
-        FlySim s(999);
-        s.setBinRect(QRectF(200, 200, side, side));
-        s.setFullness(1.0f);
-        for (int i = 0; i < 300; ++i)
+    // --- count: never more than 6, never fewer than 1 while occupied ---
+    {
+        FlySim s = makeSim(40, 1.0f);
+        int seen = 0, minSeen = 99;
+        for (int i = 0; i < 1200; ++i) { // 60s
             s.step(0.05f);
-        const QPointF c(200 + side / 2, 200 + side / 2);
-        double sum = 0;
-        for (const Fly &f : s.flies())
-            sum += std::hypot(f.pos.x() - c.x(), f.pos.y() - c.y());
-        return s.flies().isEmpty() ? 0.0 : sum / s.flies().size();
-    };
-    const double small = meanOrbit(40), big = meanOrbit(95);
-    const double ratio = big / small;
-    std::printf("orbit scales %.0f -> %.0f px (x%.2f for a x2.38 icon)\n",
-                small, big, ratio);
-    if (ratio < 1.7 || ratio > 3.1) {
-        std::printf("FAIL: swarm does not scale with the icon\n"); return 1;
+            seen = std::max(seen, int(s.flies().size()));
+            if (i > 40) // let the first one arrive
+                minSeen = std::min(minSeen, int(s.flies().size()));
+        }
+        std::printf("full bin over 60s: %d..%d flies\n", minSeen, seen);
+        if (seen > 6) return fail("more than 6 flies on screen");
+        if (minSeen < 1) return fail("bin occupied but no flies");
     }
 
-
-    // How far out does the swarm actually reach, per icon size? The
-    // overlay margin is derived from this; too small and flies clip at
-    // the window edge.
-    for (qreal side : {28.0, 40.0, 95.0}) {
-        FlySim s(4242);
-        s.setBinRect(QRectF(500, 500, side, side));
-        s.setFullness(1.0f);
-        double worst = 0;
+    // A nearly-empty bin still gets its lone fly.
+    {
+        FlySim s = makeSim(40, 0.03f);
+        int minSeen = 99, maxSeen = 0;
         for (int i = 0; i < 600; ++i) {
             s.step(0.05f);
-            const QPointF c(500 + side / 2, 500 + side / 2);
-            for (const Fly &f : s.flies())
-                worst = std::max(worst, std::hypot(f.pos.x() - c.x(), f.pos.y() - c.y()));
+            if (i > 40) {
+                minSeen = std::min(minSeen, int(s.flies().size()));
+                maxSeen = std::max(maxSeen, int(s.flies().size()));
+            }
         }
-        const int margin = FlySim::recommendedMargin(side);
-        std::printf("icon %3.0fpx -> reach %.0fpx, margin %d %s\n",
-                    side, worst, margin, worst <= margin ? "ok" : "CLIPS");
-        if (worst > margin) {
-            std::printf("FAIL: swarm clips at the overlay edge\n"); return 1;
-        }
+        std::printf("nearly-empty bin: %d..%d flies\n", minSeen, maxSeen);
+        if (minSeen < 1) return fail("one item in the bin should still draw a fly");
     }
 
-    // Emptying the bin must drive it to fully idle, or we never stop
-    // rendering and the power budget is blown.
-    s.setFullness(0.0f);
-    int steps = 0;
-    while (!s.isIdle() && steps < 4000) { s.step(0.05f); ++steps; }
-    std::printf("emptied: idle after %.1fs (%lld left)\n",
-                steps * 0.05, (long long)s.flies().size());
-    if (!s.isIdle()) { std::printf("FAIL: swarm never went idle\n"); return 1; }
+    // --- turnover: flies come and go rather than persisting forever ---
+    {
+        FlySim s = makeSim(40, 1.0f);
+        for (int i = 0; i < 100; ++i) s.step(0.05f);
+        int departures = 0, wasLeaving = 0;
+        for (int i = 0; i < 600; ++i) { // 30s
+            s.step(0.05f);
+            int leaving = 0;
+            for (const Fly &f : s.flies())
+                if (f.leaving) ++leaving;
+            if (leaving > wasLeaving) departures += leaving - wasLeaving;
+            wasLeaving = leaving;
+        }
+        // Lifetimes are 2-6s, so 30s across up to 6 slots should retire a
+        // good number of flies.
+        std::printf("turnover: %d departures in 30s\n", departures);
+        if (departures < 10) return fail("flies are not being replaced");
+    }
+
+    // --- movement: both modes actually occur ---
+    {
+        FlySim s = makeSim(40, 1.0f);
+        int crawlSamples = 0, flySamples = 0;
+        for (int i = 0; i < 800; ++i) {
+            s.step(0.05f);
+            for (const Fly &f : s.flies())
+                (f.mode == FlyMode::Crawling ? crawlSamples : flySamples)++;
+        }
+        const double crawlShare =
+            double(crawlSamples) / std::max(1, crawlSamples + flySamples);
+        std::printf("mode mix: %.0f%% crawling, %.0f%% flying\n",
+                    crawlShare * 100, (1 - crawlShare) * 100);
+        if (crawlShare < 0.15 || crawlShare > 0.85)
+            return fail("one movement mode dominates; the mix looks wrong");
+    }
+
+    // --- containment: must fit the asymmetric overlay margins ---
+    for (qreal side : {28.0, 40.0, 95.0}) {
+        FlySim s = makeSim(side, 1.0f, 4242);
+        const QPointF c(500 + side / 2, 500 + side * 0.35);
+        double worstX = 0, worstUp = 0, worstDown = 0;
+        for (int i = 0; i < 1200; ++i) {
+            s.step(0.05f);
+            for (const Fly &f : s.flies()) {
+                worstX = std::max(worstX, std::abs(f.pos.x() - c.x()));
+                const double dy = f.pos.y() - c.y();
+                if (dy < 0) worstUp = std::max(worstUp, -dy);
+                else        worstDown = std::max(worstDown, dy);
+            }
+        }
+        const int mx = FlySim::marginX(side);
+        const int mt = FlySim::marginTop(side);
+        const int mb = FlySim::marginBottom(side);
+        const bool ok = worstX <= mx && worstUp <= mt && worstDown <= mb;
+        std::printf("icon %3.0fpx: x %.0f/%d  up %.0f/%d  down %.0f/%d %s\n",
+                    side, worstX, mx, worstUp, mt, worstDown, mb,
+                    ok ? "ok" : "CLIPS");
+        if (!ok) return fail("swarm escapes the overlay margins");
+    }
+
+    // --- scaling: the swarm grows with a magnified Dock tile ---
+    {
+        auto spread = [](qreal side) {
+            FlySim s = makeSim(side, 1.0f, 999);
+            const QPointF c(500 + side / 2, 500 + side * 0.35);
+            double sum = 0; int n = 0;
+            for (int i = 0; i < 600; ++i) {
+                s.step(0.05f);
+                for (const Fly &f : s.flies()) {
+                    sum += std::hypot(f.pos.x() - c.x(), f.pos.y() - c.y());
+                    ++n;
+                }
+            }
+            return n ? sum / n : 0.0;
+        };
+        const double ratio = spread(95) / spread(40);
+        std::printf("spread scales x%.2f for a x2.38 icon\n", ratio);
+        if (ratio < 1.7 || ratio > 3.1)
+            return fail("swarm does not scale with the icon");
+    }
+
+    // --- determinism: same seed, same flight path ---
+    {
+        FlySim a = makeSim(40, 1.0f, 777), b = makeSim(40, 1.0f, 777);
+        for (int i = 0; i < 200; ++i) { a.step(0.05f); b.step(0.05f); }
+        if (a.flies().size() != b.flies().size()
+            || (!a.flies().isEmpty() && a.flies()[0].pos != b.flies()[0].pos))
+            return fail("not deterministic for a fixed seed");
+        std::printf("deterministic: same seed reproduces the swarm\n");
+    }
+
+    // --- idle: an emptied bin must stop rendering entirely ---
+    {
+        FlySim s = makeSim(40, 1.0f);
+        for (int i = 0; i < 200; ++i) s.step(0.05f);
+        s.setFullness(0.0f);
+        int steps = 0;
+        while (!s.isIdle() && steps < 4000) { s.step(0.05f); ++steps; }
+        std::printf("emptied: idle after %.1fs (%lld left)\n",
+                    steps * 0.05, (long long)s.flies().size());
+        if (!s.isIdle()) return fail("swarm never went idle");
+    }
 
     std::printf("PASS\n");
     return 0;

@@ -14,6 +14,42 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
+# Find Qt without requiring the caller to know where it lives.
+#
+# CMAKE_PREFIX_PATH may arrive empty rather than unset — the `dev` preset
+# sets it from $env{QT_ROOT}, and an editor that doesn't export QT_ROOT
+# expands that to "", which silently defeats the search. So treat empty
+# as "not specified" and fall back to the standard install location,
+# newest version first.
+if(NOT CMAKE_PREFIX_PATH)
+    if(DEFINED ENV{QT_ROOT})
+        set(CMAKE_PREFIX_PATH "$ENV{QT_ROOT}")
+    else()
+        if(APPLE)
+            file(GLOB _qt_dirs "$ENV{HOME}/Qt/6.*/macos")
+        else()
+            file(GLOB _qt_dirs "$ENV{HOME}/Qt/6.*/gcc_64" "C:/Qt/6.*/msvc*")
+        endif()
+        if(_qt_dirs)
+            list(SORT _qt_dirs COMPARE NATURAL ORDER DESCENDING)
+            list(GET _qt_dirs 0 _qt_found)
+            set(CMAKE_PREFIX_PATH "${_qt_found}")
+            message(STATUS "Qt not specified; auto-detected ${_qt_found}")
+        endif()
+    endif()
+endif()
+
+find_package(Qt6 6.11 QUIET COMPONENTS Core Gui Qml Quick QuickControls2)
+if(NOT Qt6_FOUND)
+    message(FATAL_ERROR
+        "Qt 6.11+ not found.\n"
+        "Point the build at it in any one of these ways:\n"
+        "  export QT_ROOT=~/Qt/6.11.1/macos\n"
+        "  cmake --preset dev -DCMAKE_PREFIX_PATH=~/Qt/6.11.1/macos\n"
+        "  create CMakeUserPresets.json with a preset inheriting 'dev'\n"
+        "In VS Code, select the 'local' preset rather than 'dev' if you\n"
+        "have a CMakeUserPresets.json.")
+endif()
 find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2)
 qt_standard_project_setup(REQUIRES 6.11)
 

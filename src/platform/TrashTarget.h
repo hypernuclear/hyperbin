@@ -5,6 +5,7 @@
 // Everything above this line is portable; everything below it is not.
 #pragma once
 
+#include <QImage>
 #include <QObject>
 #include <QRect>
 #include <memory>
@@ -47,6 +48,13 @@ public:
     /// Platform-specific remediation for a non-Ok status: opens the
     /// Accessibility pane, or Windows' desktop-icon settings.
     virtual void openRemediation() {}
+
+    /// The bin's own icon, at `px` square, alpha included. Drawn on top
+    /// of the swarm so flies pass *behind* the bin — compositing our own
+    /// copy of the icon over them is far cheaper than masking each fly
+    /// against the shell's pixels, and needs no screen-recording
+    /// permission. Null if the platform can't supply one.
+    virtual QImage iconImage(int px) const { Q_UNUSED(px); return {}; }
 
 signals:
     /// Icon moved or resized — the overlay must follow.

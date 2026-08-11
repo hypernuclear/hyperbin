@@ -26,6 +26,7 @@ public:
     void   start() override;
     void   stop() override;
     void   openRemediation() override;
+    QImage iconImage(int px) const override;
 
     /// True once the user has granted Accessibility. Prompts on first call
     /// if `prompt` is set — only do that from onboarding, never silently.

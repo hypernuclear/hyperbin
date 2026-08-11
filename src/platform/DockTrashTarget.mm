@@ -311,6 +311,51 @@ void DockTrashTarget::pollIconRect()
     }
 }
 
+QImage DockTrashTarget::iconImage(int px) const
+{
+    // The shell's own Trash artwork, drawn over the swarm so flies pass
+    // behind the bin. Must be the named system images: iconForFile: on
+    // ~/.Trash returns a generic document icon, not the trash.
+    NSImage *icon = [NSImage imageNamed:(m_count > 0 ? NSImageNameTrashFull
+                                                     : NSImageNameTrashEmpty)];
+    if (!icon)
+        return {};
+
+    QImage out(px, px, QImage::Format_RGBA8888_Premultiplied);
+    out.fill(Qt::transparent);
+
+    // Render the NSImage into our own bitmap at the exact size we need,
+    // rather than trusting whatever representation it hands back.
+    NSBitmapImageRep *rep = [[NSBitmapImageRep alloc]
+        initWithBitmapDataPlanes:nullptr
+                      pixelsWide:px
+                      pixelsHigh:px
+                   bitsPerSample:8
+                 samplesPerPixel:4
+                        hasAlpha:YES
+                        isPlanar:NO
+                  colorSpaceName:NSCalibratedRGBColorSpace
+                     bytesPerRow:px * 4
+                    bitsPerPixel:32];
+    NSGraphicsContext *ctx =
+        [NSGraphicsContext graphicsContextWithBitmapImageRep:rep];
+    [NSGraphicsContext saveGraphicsState];
+    [NSGraphicsContext setCurrentContext:ctx];
+    [icon drawInRect:NSMakeRect(0, 0, px, px)
+            fromRect:NSZeroRect
+           operation:NSCompositingOperationSourceOver
+            fraction:1.0];
+    [NSGraphicsContext restoreGraphicsState];
+
+    // NSBitmapImageRep is bottom-up relative to QImage, hence the flip.
+    const uchar *src = rep.bitmapData;
+    for (int y = 0; y < px; ++y)
+        memcpy(out.scanLine(px - 1 - y), src + y * px * 4, px * 4);
+    [rep release];
+
+    return out;
+}
+
 void DockTrashTarget::openRemediation()
 {
     // The system prompt only appears once; after that the user has to be

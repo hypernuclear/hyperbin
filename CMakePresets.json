@@ -7,14 +7,13 @@
       "hidden": true,
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "CMAKE_PREFIX_PATH": "$env{QT_ROOT}"
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     },
     {
       "name": "dev",
       "displayName": "Dev (Debug)",
-      "description": "Set QT_ROOT, or override CMAKE_PREFIX_PATH in CMakeUserPresets.json",
+      "description": "Qt is auto-detected from ~/Qt; set QT_ROOT or CMAKE_PREFIX_PATH to override",
       "inherits": "base",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
     },

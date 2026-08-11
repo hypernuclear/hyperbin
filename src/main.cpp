@@ -86,6 +86,10 @@ int main(int argc, char **argv)
         // Saturate at ~40 items; beyond that it's already a cloud.
         fly->setFullness(qMin(1.0, n / 40.0));
         power.setBinEmpty(n == 0);
+        // Full and empty are different artwork; refresh when it flips.
+        const QRect ir = target->iconRect();
+        if (qEnvironmentVariableIsSet("HYPERBIN_BIN_MASK") && !ir.isEmpty())
+            fly->setBinIcon(target->iconImage(int(qMax(ir.width(), ir.height()) * 2)));
         if (n > 0)
             power.setSwarmIdle(false);
     });
@@ -93,12 +97,26 @@ int main(int argc, char **argv)
                      [&](const QRect &r) {
         if (!win || windowed)
             return;
-        // Overlay = icon plus flight margin. Scales with the icon so a
-        // magnified Dock tile doesn't clip the swarm at the window edge.
-        const int margin = FlySim::recommendedMargin(qMax(r.width(), r.height()));
-        win->setGeometry(r.adjusted(-margin, -margin, margin, margin));
-        fly->setBinRect(QRectF(margin, margin, r.width(), r.height()));
+        // Overlay = icon plus flight margin, scaled with the icon so a
+        // magnified Dock tile doesn't clip the swarm. Asymmetric: flies
+        // rise well above the bin but barely stray to either side.
+        const qreal d  = qMax(r.width(), r.height());
+        const int mx   = FlySim::marginX(d);
+        const int mtop = FlySim::marginTop(d);
+        const int mbot = FlySim::marginBottom(d);
+        win->setGeometry(r.adjusted(-mx, -mtop, mx, mbot));
+        fly->setBinRect(QRectF(mx, mtop, r.width(), r.height()));
         fly->setSize(QSizeF(win->width(), win->height()));
+
+        // Flies-behind-the-bin: we composite our own copy of the Trash
+        // artwork over the swarm. Correct in principle, but the
+        // Accessibility rect is NOT the artwork's visual bounds (it
+        // reports 40x28 for a square icon), so the copy lands offset from
+        // the Dock's own rendering and shows as a double image. Off until
+        // the icon's true rect can be derived — a misaligned copy looks
+        // considerably worse than flies simply passing in front.
+        if (qEnvironmentVariableIsSet("HYPERBIN_BIN_MASK"))
+            fly->setBinIcon(target->iconImage(int(qMax(r.width(), r.height()) * 2)));
     });
 
     // HYPERBIN_DEBUG=1 reports where the overlay thinks it is. Kept because

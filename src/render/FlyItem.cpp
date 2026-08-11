@@ -91,6 +91,13 @@ void FlyItem::setBinRect(const QRectF &r)
     emit binRectChanged();
 }
 
+void FlyItem::setBinIcon(const QImage &img)
+{
+    m_binIcon = img;
+    m_binIconDirty = true;
+    update();
+}
+
 void FlyItem::setFrameIntervalMs(int ms)
 {
     if (ms == m_intervalMs)
@@ -127,29 +134,79 @@ void FlyItem::tick()
 QSGNode *FlyItem::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
 {
     const auto &flies = m_sim.flies();
-    if (flies.isEmpty()) {
+    if (flies.isEmpty() && m_binIcon.isNull()) {
         delete old;
         return nullptr;
     }
 
-    auto *node = static_cast<QSGGeometryNode *>(old);
-    if (!node) {
-        node = new QSGGeometryNode;
+    // Two children, drawn in order: the swarm, then the bin's own icon on
+    // top of it. That ordering is the whole trick behind flies passing
+    // *behind* the bin — no masking, no extra shader.
+    auto *root = old;
+    QSGGeometryNode *swarm = nullptr;
+    QSGGeometryNode *iconNode = nullptr;
+    if (!root) {
+        root = new QSGNode;
+
+        swarm = new QSGGeometryNode;
         auto *g = new QSGGeometry(QSGGeometry::defaultAttributes_TexturedPoint2D(), 0);
         g->setDrawingMode(QSGGeometry::DrawTriangles);
-        node->setGeometry(g);
-        node->setFlag(QSGNode::OwnsGeometry);
-
+        swarm->setGeometry(g);
+        swarm->setFlag(QSGNode::OwnsGeometry);
         m_texture = window()->createTextureFromImage(
             m_sprite, QQuickWindow::TextureHasAlphaChannel);
         auto *m = new QSGTextureMaterial;
         m->setTexture(m_texture);
         m->setFiltering(QSGTexture::Linear);
-        node->setMaterial(m);
-        node->setFlag(QSGNode::OwnsMaterial);
+        swarm->setMaterial(m);
+        swarm->setFlag(QSGNode::OwnsMaterial);
+        root->appendChildNode(swarm);
+
+        iconNode = new QSGGeometryNode;
+        auto *ig = new QSGGeometry(QSGGeometry::defaultAttributes_TexturedPoint2D(), 0);
+        ig->setDrawingMode(QSGGeometry::DrawTriangles);
+        iconNode->setGeometry(ig);
+        iconNode->setFlag(QSGNode::OwnsGeometry);
+        auto *im = new QSGTextureMaterial;
+        im->setFiltering(QSGTexture::Linear);
+        iconNode->setMaterial(im);
+        iconNode->setFlag(QSGNode::OwnsMaterial);
+        root->appendChildNode(iconNode);
+    } else {
+        swarm    = static_cast<QSGGeometryNode *>(root->childAtIndex(0));
+        iconNode = static_cast<QSGGeometryNode *>(root->childAtIndex(1));
     }
 
-    QSGGeometry *g = node->geometry();
+    // --- the bin icon, on top ------------------------------------------
+    auto *im = static_cast<QSGTextureMaterial *>(iconNode->material());
+    if (m_binIconDirty) {
+        m_binIconDirty = false;
+        delete im->texture();
+        im->setTexture(m_binIcon.isNull()
+                           ? nullptr
+                           : window()->createTextureFromImage(
+                                 m_binIcon, QQuickWindow::TextureHasAlphaChannel));
+    }
+    QSGGeometry *ig = iconNode->geometry();
+    if (im->texture() && !m_binRect.isEmpty()) {
+        ig->allocate(6);
+        auto *iv = ig->vertexDataAsTexturedPoint2D();
+        // Dock artwork is square, but the Accessibility rect for the tile
+        // isn't (40x28 on a standard Dock) — drawing into it directly
+        // squashes the bin. Draw a square centred on the rect instead.
+        const QPointF ic = m_binRect.center();
+        const float side = float(qMax(m_binRect.width(), m_binRect.height()));
+        const float l = float(ic.x()) - side / 2, t = float(ic.y()) - side / 2;
+        const float r = l + side, b = t + side;
+        iv[0].set(l, t, 0, 0); iv[1].set(r, t, 1, 0); iv[2].set(r, b, 1, 1);
+        iv[3].set(l, t, 0, 0); iv[4].set(r, b, 1, 1); iv[5].set(l, b, 0, 1);
+    } else {
+        ig->allocate(0);
+    }
+    iconNode->markDirty(QSGNode::DirtyGeometry | QSGNode::DirtyMaterial);
+
+    // --- the swarm, underneath -----------------------------------------
+    QSGGeometry *g = swarm->geometry();
     g->allocate(flies.size() * kVertsPerFly);
     auto *v = g->vertexDataAsTexturedPoint2D();
 
@@ -161,9 +218,14 @@ QSGNode *FlyItem::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
         // Size off the icon, not a constant: Dock magnification and the
         // user's Dock-size setting both change the tile, and fixed-size
         // flies next to a magnified bin look wrong.
+        // Arrival/departure rides on size rather than alpha: a textured
+        // material has no per-vertex opacity, and one QSGOpacityNode per
+        // fly would cost more than the effect is worth. Shrinking away
+        // reads as the fly receding, which suits it.
         const float k    = m_sim.sizeScale();
-        const float hw   = 5.4f * f.scale * k;
-        const float hh   = 5.4f * f.scale * beat * k;
+        const float fade = 0.35f + 0.65f * f.fade;
+        const float hw   = 3.5f * f.scale * k * fade;
+        const float hh   = 3.5f * f.scale * beat * k * fade;
         const float x    = float(f.pos.x());
         const float y    = float(f.pos.y());
 
@@ -182,8 +244,8 @@ QSGNode *FlyItem::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
         put(-hw, -hh, 0, 0); put(hw, hh, 1, 1); put(-hw, hh, 0, 1);
     }
 
-    node->markDirty(QSGNode::DirtyGeometry);
-    return node;
+    swarm->markDirty(QSGNode::DirtyGeometry);
+    return root;
 }
 
 } // namespace hyperbin

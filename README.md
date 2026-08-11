@@ -17,13 +17,18 @@ decisions and `docs/battery.md` for the power budget.
 
 ```sh
 sh scripts/install-hooks.sh          # once per clone — see Secrets below
-export QT_ROOT=~/Qt/6.11.1/macos     # or use CMakeUserPresets.json
 cmake --preset dev && cmake --build --preset dev
 ```
 
-Qt's location is never committed. `CMakePresets.json` reads it from
-`QT_ROOT`; to pin it per machine instead, create a `CMakeUserPresets.json`
-(git-ignored) inheriting `dev` and setting `CMAKE_PREFIX_PATH`.
+Qt's location is never committed. The build auto-detects the newest
+`~/Qt/6.*` install; override with `QT_ROOT`, with
+`-DCMAKE_PREFIX_PATH=...`, or by pinning it in a `CMakeUserPresets.json`
+(git-ignored) that inherits `dev`.
+
+An empty `-DCMAKE_PREFIX_PATH=` is deliberately treated as "not
+specified" rather than "search nowhere": an editor that expands an unset
+`$env{}` to an empty string would otherwise silently break the Qt lookup,
+which is exactly how this broke once already.
 
 ## Secrets
 

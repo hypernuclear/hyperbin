@@ -36,9 +36,13 @@ public:
     int  frameIntervalMs() const { return m_intervalMs; }
     void setFrameIntervalMs(int ms);
 
-    /// Rect of the bin icon in item-local coords; the swarm orbits it.
+    /// Rect of the bin icon in item-local coords; the swarm stays over it.
     QRectF binRect() const { return m_binRect; }
     void   setBinRect(const QRectF &r);
+
+    /// The bin's own artwork, composited over the flies so they pass
+    /// behind it. Pass a null image to draw nothing on top.
+    void setBinIcon(const QImage &img);
 
     bool swarmIdle() const { return m_sim.isIdle(); }
 
@@ -62,6 +66,8 @@ private:
     FlySim        m_sim;
     QRectF        m_binRect;
     QImage        m_sprite;
+    QImage        m_binIcon;
+    bool          m_binIconDirty = false;
     QSGTexture   *m_texture = nullptr; // owned by the node's material
     QTimer        m_clock;
     QElapsedTimer m_dt;

@@ -1,0 +1,180 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Qt: QML: Attach by port",
+      "type": "qml",
+      "request": "attach",
+      "host": "127.0.0.1",
+      "port": "25684"
+    },
+    {
+      // Everyday config: windowed dev mode with the stub trash target, so
+      // the sim is iterable without fighting the Dock or the shell.
+      "name": "hyperbin: Windowed (stub target)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${command:cmake.launchTargetPath}",
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "visualizerFile": "${command:qt-cpp.natvis}",
+      "showDisplayString": true,
+      "environment": [
+        { "HYPERBIN_DEBUG": "1" }
+        // { "name": "QSG_INFO", "value": "1" },
+        // { "name": "QSG_RENDER_TIMING", "value": "1" },
+        // { "name": "QSG_RHI_BACKEND", "value": "metal" },
+        // { "name": "QML_IMPORT_TRACE", "value": "1" },
+        // { "name": "QT_LOGGING_RULES", "value": "*.debug=true" }
+      ],
+      "args": ["--windowed", "--stub"],
+      "linux": {
+        "MIMode": "gdb",
+        "miDebuggerPath": "/usr/bin/gdb"
+      },
+      "osx": {
+        "MIMode": "lldb",
+        "targetArchitecture": "arm64",
+        "logging": {
+          "moduleLoad": false
+        }
+      },
+      "windows": {
+        "environment": [
+          {
+            "name": "PATH",
+            "value": "${env:PATH};${command:qt-cpp.qtDir}"
+          },
+          {
+            "name": "QT_QPA_PLATFORM_PLUGIN_PATH",
+            "value": "${command:qt-cpp.QT_QPA_PLATFORM_PLUGIN_PATH}"
+          },
+          {
+            "name": "QML_IMPORT_PATH",
+            "value": "${command:qt-cpp.QML_IMPORT_PATH}"
+          }
+        ],
+        "MIMode": "gdb",
+        "miDebuggerPath": "${command:qt-cpp.minGWgdb}"
+      }
+    },
+    {
+      // Real overlay: frameless, click-through, positioned over the actual
+      // trash icon. Note the overlay is click-through, so breakpoints are
+      // the only way to inspect it — you can't click on it.
+      "name": "hyperbin: Overlay",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${command:cmake.launchTargetPath}",
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "visualizerFile": "${command:qt-cpp.natvis}",
+      "showDisplayString": true,
+      "environment": [],
+      "args": [],
+      "linux": {
+        "MIMode": "gdb",
+        "miDebuggerPath": "/usr/bin/gdb"
+      },
+      "osx": {
+        "MIMode": "lldb",
+        "targetArchitecture": "arm64",
+        "logging": {
+          "moduleLoad": false
+        }
+      },
+      "windows": {
+        "environment": [
+          {
+            "name": "PATH",
+            "value": "${env:PATH};${command:qt-cpp.qtDir}"
+          },
+          {
+            "name": "QT_QPA_PLATFORM_PLUGIN_PATH",
+            "value": "${command:qt-cpp.QT_QPA_PLATFORM_PLUGIN_PATH}"
+          },
+          {
+            "name": "QML_IMPORT_PATH",
+            "value": "${command:qt-cpp.QML_IMPORT_PATH}"
+          }
+        ],
+        "MIMode": "gdb",
+        "miDebuggerPath": "${command:qt-cpp.minGWgdb}"
+      }
+    },
+    {
+      // Windowed + QML debugger attached. Pair with the compound below.
+      "name": "Qt: Debug with cppdbg and QML debugger",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${command:cmake.launchTargetPath}",
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "visualizerFile": "${command:qt-cpp.natvis}",
+      "showDisplayString": true,
+      "environment": [],
+      "args": [
+        "--windowed",
+        "--stub",
+        "-qmljsdebugger=host:127.0.0.1,port:25684,services:DebugMessages,QmlDebugger,V8Debugger,QmlInspector"
+      ],
+      "linux": {
+        "MIMode": "gdb",
+        "miDebuggerPath": "/usr/bin/gdb"
+      },
+      "osx": {
+        "MIMode": "lldb",
+        "targetArchitecture": "arm64",
+        "logging": {
+          "moduleLoad": false
+        }
+      },
+      "windows": {
+        "environment": [
+          {
+            "name": "PATH",
+            "value": "${env:PATH};${command:qt-cpp.qtDir}"
+          },
+          {
+            "name": "QT_QPA_PLATFORM_PLUGIN_PATH",
+            "value": "${command:qt-cpp.QT_QPA_PLATFORM_PLUGIN_PATH}"
+          },
+          {
+            "name": "QML_IMPORT_PATH",
+            "value": "${command:qt-cpp.QML_IMPORT_PATH}"
+          }
+        ],
+        "MIMode": "gdb",
+        "miDebuggerPath": "${command:qt-cpp.minGWgdb}"
+      }
+    },
+    {
+      // Headless swarm check — populates, moves, orbits, is deterministic,
+      // and fully disperses when the bin empties.
+      "name": "Test: Fly Simulation",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/simtest",
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "args": [],
+      "osx": {
+        "MIMode": "lldb",
+        "targetArchitecture": "arm64"
+      }
+    }
+  ],
+  "compounds": [
+    {
+      "name": "C++/QML",
+      "configurations": [
+        "Qt: Debug with cppdbg and QML debugger",
+        "Qt: QML: Attach by port"
+      ]
+    }
+  ]
+}

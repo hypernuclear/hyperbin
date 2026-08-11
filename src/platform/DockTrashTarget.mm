@@ -4,6 +4,8 @@
 #import <ApplicationServices/ApplicationServices.h>
 
 #include <QDebug>
+#include <algorithm>
+#include <cmath>
 #include <QDir>
 #include <QFileInfo>
 #include <QStandardPaths>
@@ -67,6 +69,109 @@ AXUIElementRef findTrashItem()
     return found;
 }
 
+/// The Accessibility rect for a dock item is its hit area, not the
+/// artwork's bounds — it's larger and offset. Everything we draw needs
+/// the artwork's real rect. See the calibration note inside.
+QRect visualIconRect(const QRect &ax)
+{
+    if (ax.isEmpty())
+        return ax;
+
+    const int minDim = qMin(ax.width(), ax.height());
+    const int majDim = qMax(ax.width(), ax.height());
+
+    // The Dock draws each item as a SQUARE tile, and the artwork carries
+    // its own transparent padding inside that square. So the thing to
+    // locate is the tile, not the visible bin: one square, one size, one
+    // centre. Mapping the uncropped artwork onto it reproduces whatever
+    // inset the artwork has, for free.
+    //
+    // Evidence the tile is square and the AX rect is tile + fixed padding:
+    //
+    //   state      AX rect     minDim   majDim - minDim
+    //   resting    40 x 28     28       12
+    //   magnified  109 x 97    97       12
+    //
+    // sizeK is therefore expected to be near 1.0, and nearPt/crossPt near
+    // 0 — small residuals, not the large fudges they were. A constant
+    // offset in POINTS is also why alignment looked fine magnified and
+    // badly wrong small: 8pt is a third of a 25pt icon and under a tenth
+    // of an 87pt one. Verify with HYPERBIN_CALIBRATE=s|x|y.
+    // Residuals against the square model, confirmed by eye through the
+    // calibration sweeps rather than by an automated fit — the fitter
+    // could never segment a semi-transparent bin reliably.
+    //
+    // sizeK is the one that matters: 0.957 is close to the 1.0 the model
+    // predicts, and the small shortfall is the tile's own inset. Crucially
+    // it holds across magnification, which the previous visible-bin model
+    // never managed — its constants traded off against tile size, so it
+    // could be right small or right large but never both.
+    double sizeK  = 0.957; // tile side / min(AX.w, AX.h)
+    double nearPt = 5.0;   // residual toward the Dock's edge, in pt
+    double crossPt = 3.0;  // residual along the Dock, in pt
+    // The artwork is not quite centred in the AX tile: it sits a couple of
+    // points right of centre, so the mask's left edge lands inside the
+    // bin while the right edge is exact. This is applied to the left edge
+    // ALONE — shifting the centre instead would drag the right edge in
+    // with it, and the right edge is correct. Constant in points, not
+    // scaled with the tile: alignment currently holds across the full
+    // magnification range, and a scaled term would break that at the top
+    // end to fix two pixels at the bottom.
+    const double leftBleedPt = 2.0;
+    double dxExtra = 0.0, dyExtra = 0.0, scaleExtra = 1.0;
+    if (qEnvironmentVariableIsSet("HYPERBIN_BIN_ADJUST")) {
+        const QStringList p = qEnvironmentVariable("HYPERBIN_BIN_ADJUST").split(',');
+        if (p.size() >= 1) dxExtra = p[0].toDouble();
+        if (p.size() >= 2) dyExtra = p[1].toDouble();
+        if (p.size() >= 3 && p[2].toDouble() > 0) scaleExtra = p[2].toDouble();
+    }
+    // Square: the artwork is square, so width and height match. Kept as a
+    // double until the very end: rounding the side first and then placing
+    // it with `centre - w / 2` puts the whole rounding error on one edge,
+    // because integer division truncates. That is a hard 1px overhang on
+    // the right (and bottom) whenever the side is odd.
+    const double side = sizeK * minDim * scaleExtra;
+    const double shift = nearPt;
+    Q_UNUSED(majDim);
+    // Which edge is the Dock on? Infer from geometry rather than reading
+    // com.apple.dock, so a per-display arrangement can't disagree.
+    QRect screen;
+    const CGFloat primaryMaxY = NSMaxY(NSScreen.screens.firstObject.frame);
+    for (NSScreen *sc in NSScreen.screens) {
+        const NSRect f = sc.frame;
+        const QRect s(int(f.origin.x), int(primaryMaxY - NSMaxY(f)),
+                      int(f.size.width), int(f.size.height));
+        if (s.intersects(ax)) { screen = s; break; }
+    }
+    QPointF c = QRectF(ax).center();
+    if (ax.width() >= ax.height()) {
+        const bool dockOnLeft = screen.isNull()
+            || (c.x() - screen.left()) <= (screen.right() - c.x());
+        c.rx() += dockOnLeft ? -shift : shift;
+        c.ry() += crossPt;
+    } else {
+        const bool dockOnTop = !screen.isNull()
+            && (c.y() - screen.top()) < (screen.bottom() - c.y());
+        c.ry() += dockOnTop ? -shift : shift;
+        c.rx() += crossPt;
+    }
+    // Each edge is derived independently from the same real-valued
+    // centre, so the rounding error can't all land on one side — that was
+    // a hard 1px overhang on the right whenever the side was odd.
+    //
+    // And each edge rounds OUTWARD rather than to nearest. The two errors
+    // are not equally bad: a mask a hair too large hides a fly a pixel
+    // early, which is invisible, while one a hair too small lets a fly
+    // that should be behind the bin show through along the edge. At a
+    // small Dock size the side is ~17.2px inside an 18px tile, so
+    // round-to-nearest reliably ate a pixel off one edge.
+    const int x0 = int(std::floor(c.x() - side / 2.0 + dxExtra - leftBleedPt));
+    const int y0 = int(std::floor(c.y() - side / 2.0 + dyExtra));
+    const int x1 = int(std::ceil (c.x() + side / 2.0 + dxExtra));
+    const int y1 = int(std::ceil (c.y() + side / 2.0 + dyExtra));
+    return QRect(x0, y0, x1 - x0, y1 - y0);
+}
+
 } // namespace
 
 struct DockTrashTarget::Impl
@@ -104,7 +209,7 @@ DockTrashTarget::DockTrashTarget(QObject *parent)
     m_poll.setInterval(kFastPollMs);
     connect(&m_poll, &QTimer::timeout, this, [this] {
         pollIconRect();
-        if (++m_trashTick >= (m_poll.interval() >= kSlowPollMs ? 1 : 20)) {
+        if (++m_trashTick >= (m_poll.interval() >= kSlowPollMs ? 1 : 60)) {
             m_trashTick = 0;
             pollTrash();  // the Finder round-trip stays at ~1Hz regardless
         }
@@ -273,7 +378,8 @@ void DockTrashTarget::pollIconRect()
 
     // AX reports top-left-origin points, same convention and units as Qt
     // screen coordinates, so this needs no conversion.
-    const QRect r(int(pos.x), int(pos.y), int(size.width), int(size.height));
+    const QRect axRect(int(pos.x), int(pos.y), int(size.width), int(size.height));
+    const QRect r = visualIconRect(axRect);
 
     // An auto-hidden Dock parks its items just outside the screen it
     // belongs to, so "is it visible" is exactly "does it land on any
@@ -291,7 +397,7 @@ void DockTrashTarget::pollIconRect()
         const NSRect f = sc.frame;
         const QRect inAxSpace(int(f.origin.x), int(primaryMaxY - NSMaxY(f)),
                               int(f.size.width), int(f.size.height));
-        if (inAxSpace.intersects(r))
+        if (inAxSpace.intersects(axRect))
             onScreen = true;
     }
 
@@ -324,21 +430,22 @@ QImage DockTrashTarget::iconImage(int px) const
     QImage out(px, px, QImage::Format_RGBA8888_Premultiplied);
     out.fill(Qt::transparent);
 
-    // Render the NSImage into our own bitmap at the exact size we need,
-    // rather than trusting whatever representation it hands back.
-    NSBitmapImageRep *rep = [[NSBitmapImageRep alloc]
-        initWithBitmapDataPlanes:nullptr
-                      pixelsWide:px
-                      pixelsHigh:px
-                   bitsPerSample:8
-                 samplesPerPixel:4
-                        hasAlpha:YES
-                        isPlanar:NO
-                  colorSpaceName:NSCalibratedRGBColorSpace
-                     bytesPerRow:px * 4
-                    bitsPerPixel:32];
-    NSGraphicsContext *ctx =
-        [NSGraphicsContext graphicsContextWithBitmapImageRep:rep];
+    // Render straight into the QImage's buffer through a CGBitmapContext.
+    //
+    // sRGB specifically: NSCalibratedRGBColorSpace renders noticeably
+    // darker than the Dock's own drawing, which showed up as a tonal
+    // mismatch between our copy and the icon underneath it. Measured with
+    // an off/on screen diff over the icon region.
+    CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGContextRef cg = CGBitmapContextCreate(
+        out.bits(), px, px, 8, out.bytesPerLine(), cs,
+        kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGColorSpaceRelease(cs);
+    if (!cg)
+        return {};
+
+    NSGraphicsContext *ctx = [NSGraphicsContext graphicsContextWithCGContext:cg
+                                                                     flipped:NO];
     [NSGraphicsContext saveGraphicsState];
     [NSGraphicsContext setCurrentContext:ctx];
     [icon drawInRect:NSMakeRect(0, 0, px, px)
@@ -346,13 +453,20 @@ QImage DockTrashTarget::iconImage(int px) const
            operation:NSCompositingOperationSourceOver
             fraction:1.0];
     [NSGraphicsContext restoreGraphicsState];
+    CGContextRelease(cg);
 
-    // NSBitmapImageRep is bottom-up relative to QImage, hence the flip.
-    const uchar *src = rep.bitmapData;
-    for (int y = 0; y < px; ++y)
-        memcpy(out.scanLine(px - 1 - y), src + y * px * 4, px * 4);
-    [rep release];
-
+    // No flip. AppKit's drawInRect: through a non-flipped NSGraphicsContext
+    // already lands the pixels top-down in the buffer, matching QImage.
+    // Verified by dumping this image and comparing against the system
+    // artwork — flipping the CTM *or* mirroring afterwards each produced
+    // an upside-down bin.
+    //
+    // NOT cropped. The artwork's own transparent padding is part of how
+    // the Dock lays the icon out, so the image and the rect it's mapped
+    // onto must describe the same square. Cropping to the alpha bounds
+    // made the mask's apparent size depend on the crop threshold, which
+    // then had to be cancelled out by a fudge in sizeK — two constants
+    // fighting, and the reason the size never settled.
     return out;
 }
 

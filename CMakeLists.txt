@@ -39,7 +39,7 @@ if(NOT CMAKE_PREFIX_PATH)
     endif()
 endif()
 
-find_package(Qt6 6.11 QUIET COMPONENTS Core Gui Qml Quick QuickControls2)
+find_package(Qt6 6.11 QUIET COMPONENTS Core Gui Qml Quick QuickControls2 ShaderTools)
 if(NOT Qt6_FOUND)
     message(FATAL_ERROR
         "Qt 6.11+ not found.\n"
@@ -50,7 +50,7 @@ if(NOT Qt6_FOUND)
         "In VS Code, select the 'local' preset rather than 'dev' if you\n"
         "have a CMakeUserPresets.json.")
 endif()
-find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2)
+find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 ShaderTools)
 qt_standard_project_setup(REQUIRES 6.11)
 
 qt_add_executable(hyperbin
@@ -67,8 +67,18 @@ qt_add_executable(hyperbin
     $<$<PLATFORM_ID:Darwin>:src/platform/MacOverlay.mm>
     src/render/FlyItem.cpp
     src/render/FlyItem.h
+    src/render/FlyMaskMaterial.cpp
+    src/render/FlyMaskMaterial.h
 )
 
+# The fly material samples the bin's silhouette to erase flies behind it.
+qt_add_shaders(hyperbin "hyperbin_shaders"
+    PREFIX "/shaders"
+    BASE shaders
+    FILES
+        shaders/flymask.vert
+        shaders/flymask.frag
+)
 qt_add_qml_module(hyperbin
     URI hyperbin
     VERSION 1.0

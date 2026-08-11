@@ -88,7 +88,7 @@ int main(int argc, char **argv)
         power.setBinEmpty(n == 0);
         // Full and empty are different artwork; refresh when it flips.
         const QRect ir = target->iconRect();
-        if (qEnvironmentVariableIsSet("HYPERBIN_BIN_MASK") && !ir.isEmpty())
+        if (!ir.isEmpty())
             fly->setBinIcon(target->iconImage(int(qMax(ir.width(), ir.height()) * 2)));
         if (n > 0)
             power.setSwarmIdle(false);
@@ -108,15 +108,11 @@ int main(int argc, char **argv)
         fly->setBinRect(QRectF(mx, mtop, r.width(), r.height()));
         fly->setSize(QSizeF(win->width(), win->height()));
 
-        // Flies-behind-the-bin: we composite our own copy of the Trash
-        // artwork over the swarm. Correct in principle, but the
-        // Accessibility rect is NOT the artwork's visual bounds (it
-        // reports 40x28 for a square icon), so the copy lands offset from
-        // the Dock's own rendering and shows as a double image. Off until
-        // the icon's true rect can be derived — a misaligned copy looks
-        // considerably worse than flies simply passing in front.
-        if (qEnvironmentVariableIsSet("HYPERBIN_BIN_MASK"))
-            fly->setBinIcon(target->iconImage(int(qMax(r.width(), r.height()) * 2)));
+        // Flies pass behind the bin: our own copy of the Trash artwork is
+        // composited over the swarm. This only works because iconRect()
+        // now reports the artwork's true bounds rather than the
+        // Accessibility hit area — see visualIconRect().
+        fly->setBinIcon(target->iconImage(int(qMax(r.width(), r.height()) * 2)));
     });
 
     // HYPERBIN_DEBUG=1 reports where the overlay thinks it is. Kept because
@@ -128,12 +124,13 @@ int main(int argc, char **argv)
         dbg->setInterval(1000);
         QObject::connect(dbg, &QTimer::timeout, [&] {
             const QRect g = win->geometry();
-            qInfo("dbg: win visible=%d geom=(%d,%d %dx%d) screen=%s | fly size=%.0fx%.0f "
-                  "fullness=%.2f interval=%d render=%d",
+            const QRect ir = target->iconRect();
+            qInfo("dbg: win visible=%d geom=(%d,%d %dx%d) icon=(%d,%d %dx%d) "
+                  "screen=%s fullness=%.2f interval=%d render=%d",
                   win->isVisible(), g.x(), g.y(), g.width(), g.height(),
+                  ir.x(), ir.y(), ir.width(), ir.height(),
                   win->screen() ? qPrintable(win->screen()->name()) : "none",
-                  fly->width(), fly->height(), fly->fullness(),
-                  fly->frameIntervalMs(), power.shouldRender());
+                  fly->fullness(), fly->frameIntervalMs(), power.shouldRender());
         });
         dbg->start();
     }

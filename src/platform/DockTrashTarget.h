@@ -50,9 +50,11 @@ private:
     QRect     m_rect;
     int       m_count  = 0;
     Status    m_status = Status::NotFound;
-    // Fast enough to follow Dock magnification, which resizes the tile
-    // continuously while the pointer is over it.
-    static constexpr int kFastPollMs = 50;
+    // Frame rate, not a compromise: one AX position+size round-trip was
+    // measured at 0.039ms, so 60Hz costs ~0.2% of a core. Polling slower
+    // than the render clock is what made the overlay visibly lag the
+    // Dock during magnification.
+    static constexpr int kFastPollMs = 16;
     static constexpr int kSlowPollMs = 1000;
 
     QTimer    m_poll;

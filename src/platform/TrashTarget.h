@@ -49,11 +49,10 @@ public:
     /// Accessibility pane, or Windows' desktop-icon settings.
     virtual void openRemediation() {}
 
-    /// The bin's own icon, at `px` square, alpha included. Drawn on top
-    /// of the swarm so flies pass *behind* the bin — compositing our own
-    /// copy of the icon over them is far cheaper than masking each fly
-    /// against the shell's pixels, and needs no screen-recording
-    /// permission. Null if the platform can't supply one.
+    /// The bin's own artwork, cropped to its alpha bounds, at most `px`
+    /// on a side. Used as an occlusion MASK — its alpha decides which fly
+    /// pixels are erased, so flies pass behind the bin while the shell
+    /// keeps drawing the icon itself. Null if unavailable.
     virtual QImage iconImage(int px) const { Q_UNUSED(px); return {}; }
 
 signals:

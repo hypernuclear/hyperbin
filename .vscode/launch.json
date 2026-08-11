@@ -23,7 +23,8 @@
       "visualizerFile": "${command:qt-cpp.natvis}",
       "showDisplayString": true,
       "environment": [
-        { "HYPERBIN_DEBUG": "1" }
+        // NOTE: HYPERBIN_SHOW_BINRECT / HYPERBIN_BIN_ADJUST belong on the
+        // Overlay config, not here — windowed mode never touches the Dock.
         // { "name": "QSG_INFO", "value": "1" },
         // { "name": "QSG_RENDER_TIMING", "value": "1" },
         // { "name": "QSG_RHI_BACKEND", "value": "metal" },
@@ -73,7 +74,14 @@
       "cwd": "${workspaceFolder}",
       "visualizerFile": "${command:qt-cpp.natvis}",
       "showDisplayString": true,
-      "environment": [],
+      "environment": [
+        // cppdbg wants {"name","value"} pairs and silently ignores any
+        // other shape, so {"VAR": "1"} looks right and does nothing.
+        // { "name": "HYPERBIN_SHOW_BINRECT", "value": "1" }
+        // { "name": "HYPERBIN_BIN_ADJUST", "value": "5,0,1" } // dx,dy,scale
+        { "name": "HYPERBIN_CALIBRATE", "value": "x8" } // dx,dy,scale
+        // { "name": "HYPERBIN_DEBUG", "value": "1" }
+      ],
       "args": [],
       "linux": {
         "MIMode": "gdb",

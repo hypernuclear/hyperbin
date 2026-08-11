@@ -68,7 +68,8 @@ private:
     QImage        m_sprite;
     QImage        m_binIcon;
     bool          m_binIconDirty = false;
-    QSGTexture   *m_texture = nullptr; // owned by the node's material
+    QSGTexture   *m_texture = nullptr;     // sprite atlas
+    QSGTexture   *m_maskTexture = nullptr; // bin silhouette
     QTimer        m_clock;
     QElapsedTimer m_dt;
     int           m_intervalMs = 0;

@@ -5,7 +5,7 @@
 #include <QQuickWindow>
 #include <QSGGeometryNode>
 #include <QSGTexture>
-#include <QSGTextureMaterial>
+#include "FlyMaskMaterial.h"
 #include <QtMath>
 
 namespace hyperbin {
@@ -18,48 +18,73 @@ constexpr int kVertsPerFly = 6;
 // Sprite size in device pixels. The fly is drawn ~7px on screen, so 32
 // gives headroom for retina and for the scale variation between flies.
 constexpr int kSpritePx = 32;
+// Wing positions in the atlas. Four is enough at this size: a flap is
+// perceived as motion, not as distinct poses.
+constexpr int kFlyFrames = 4;
 } // namespace
 
 QImage FlyItem::buildSprite(int px)
 {
-    QImage img(px, px, QImage::Format_RGBA8888_Premultiplied);
+    // A horizontal atlas of kFlyFrames wing positions. The body is
+    // identical in every frame; only the wings move.
+    //
+    // Previously a single frame was squashed vertically to fake a
+    // wingbeat, which pulsed the whole insect — body, head and all —
+    // rather than beating its wings. Separate frames cost one texture and
+    // a UV offset, and are the difference between a throb and a flap.
+    QImage img(px * kFlyFrames, px, QImage::Format_RGBA8888_Premultiplied);
     img.fill(Qt::transparent);
 
     QPainter p(&img);
     p.setRenderHint(QPainter::Antialiasing, true);
 
-    const qreal c  = px * 0.5;
-    const qreal bw = px * 0.30; // body half-length (points along +x)
-    const qreal bh = px * 0.19; // body half-width
+    const qreal bw = px * 0.26;  // body half-length (points along +x)
+    const qreal bh = px * 0.165; // body half-width
 
-    // Wings first, swept back from the shoulders, so the body overlaps
-    // their roots. Translucent and cool-toned — a fly's wings are the
-    // only bright thing on it.
-    p.setPen(Qt::NoPen);
-    p.setBrush(QColor(240, 244, 250, 150));
-    for (int s : {-1, 1}) {
-        QPainterPath wing;
-        wing.moveTo(c - bw * 0.1, c + s * bh * 0.4);
-        wing.cubicTo(c - bw * 1.5, c + s * bh * 2.6,
-                     c - bw * 2.2, c + s * bh * 1.4,
-                     c - bw * 0.9, c + s * bh * 0.5);
-        p.drawPath(wing);
+    for (int frame = 0; frame < kFlyFrames; ++frame) {
+        const qreal c = frame * px + px * 0.5;
+        const qreal cy = px * 0.5;
+
+        // Wing spread: 0 = folded along the body, 1 = fully out. A short
+        // dwell at the extremes reads better than a pure sine, because a
+        // real wingbeat spends longer at the turnaround.
+        const qreal t = qreal(frame) / kFlyFrames;
+        const qreal spread = 0.35 + 0.65 * (0.5 - 0.5 * std::cos(t * 2 * M_PI));
+
+        p.setPen(Qt::NoPen);
+
+        // Cheap drop shadow: offset ellipses at low alpha, no real blur.
+        const qreal sx = px * 0.055, sy = px * 0.075;
+        for (int i = 3; i >= 1; --i) {
+            const qreal grow = px * 0.012 * i;
+            p.setBrush(QColor(0, 0, 0, 26));
+            p.drawEllipse(QPointF(c + sx, cy + sy), bw + grow, bh + grow);
+        }
+
+        // Wings, swept back from the shoulders. White and translucent —
+        // on a dark backdrop they're the only part that reads at all.
+        p.setBrush(QColor(255, 255, 255, int(90 + 55 * spread)));
+        for (int s : {-1, 1}) {
+            QPainterPath wing;
+            const qreal out = 0.6 + 2.2 * spread; // how far it swings out
+            wing.moveTo(c - bw * 0.1, cy + s * bh * 0.4);
+            wing.cubicTo(c - bw * 1.5, cy + s * bh * out,
+                         c - bw * 2.3, cy + s * bh * (out * 0.55),
+                         c - bw * 0.9, cy + s * bh * 0.5);
+            p.drawPath(wing);
+        }
+
+        // Black body. A deliberate reversal: a mid grey was used before
+        // because black vanishes on a dark wallpaper. The wings and the
+        // drop shadow carry the silhouette in that case — but if flies
+        // ever disappear on a dark desktop again, this is the line.
+        p.setBrush(QColor(10, 10, 12));
+        p.drawEllipse(QPointF(c, cy), bw, bh);
+
+        // Head, slightly proud of the body at the front.
+        p.setBrush(QColor(24, 24, 28));
+        p.drawEllipse(QPointF(c + bw * 0.78, cy), bh * 0.7, bh * 0.7);
     }
-
-    // The body must be a MID tone, not black. Two earlier attempts failed
-    // for the same reason: a dark body contributes nothing against a dark
-    // wallpaper, so whatever outline you put around it is all that's left
-    // and the fly reads as a hollow ring. A mid grey is darker than a
-    // light desktop and lighter than a dark one, so the filled shape
-    // itself carries on both; the thin dark rim then defines the edge
-    // against light backgrounds.
-    p.setPen(QPen(QColor(16, 16, 20, 210), px * 0.055));
-    p.setBrush(QColor(126, 128, 136));
-    p.drawEllipse(QPointF(c, c), bw, bh);
-
-    // Head, slightly proud of the body at the front.
-    p.setBrush(QColor(150, 152, 160));
-    p.drawEllipse(QPointF(c + bw * 0.78, c), bh * 0.72, bh * 0.72);
 
     p.end();
     return img;
@@ -139,93 +164,216 @@ QSGNode *FlyItem::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
         return nullptr;
     }
 
-    // Two children, drawn in order: the swarm, then the bin's own icon on
-    // top of it. That ordering is the whole trick behind flies passing
-    // *behind* the bin — no masking, no extra shader.
+    // Two batches: flies behind the bin (masked) and flies in front of it
+    // (not masked). Depth is per-fly and fixed for its lifetime, so the
+    // swarm reads as occupying space around the bin rather than sitting
+    // flat behind it.
+    //
+    // Compositing a copy of the icon over everything was the earlier
+    // approach and is gone: it had to track the Dock exactly, and the
+    // Accessibility poll it depends on lags under magnification, so the
+    // copy visibly desynced from the real icon.
     auto *root = old;
-    QSGGeometryNode *swarm = nullptr;
-    QSGGeometryNode *iconNode = nullptr;
     if (!root) {
         root = new QSGNode;
-
-        swarm = new QSGGeometryNode;
-        auto *g = new QSGGeometry(QSGGeometry::defaultAttributes_TexturedPoint2D(), 0);
-        g->setDrawingMode(QSGGeometry::DrawTriangles);
-        swarm->setGeometry(g);
-        swarm->setFlag(QSGNode::OwnsGeometry);
         m_texture = window()->createTextureFromImage(
             m_sprite, QQuickWindow::TextureHasAlphaChannel);
-        auto *m = new QSGTextureMaterial;
-        m->setTexture(m_texture);
-        m->setFiltering(QSGTexture::Linear);
-        swarm->setMaterial(m);
-        swarm->setFlag(QSGNode::OwnsMaterial);
-        root->appendChildNode(swarm);
-
-        iconNode = new QSGGeometryNode;
-        auto *ig = new QSGGeometry(QSGGeometry::defaultAttributes_TexturedPoint2D(), 0);
-        ig->setDrawingMode(QSGGeometry::DrawTriangles);
-        iconNode->setGeometry(ig);
-        iconNode->setFlag(QSGNode::OwnsGeometry);
-        auto *im = new QSGTextureMaterial;
-        im->setFiltering(QSGTexture::Linear);
-        iconNode->setMaterial(im);
-        iconNode->setFlag(QSGNode::OwnsMaterial);
-        root->appendChildNode(iconNode);
-    } else {
-        swarm    = static_cast<QSGGeometryNode *>(root->childAtIndex(0));
-        iconNode = static_cast<QSGGeometryNode *>(root->childAtIndex(1));
+        for (int pass = 0; pass < 3; ++pass) {
+            auto *n = new QSGGeometryNode;
+            auto *g = new QSGGeometry(QSGGeometry::defaultAttributes_TexturedPoint2D(), 0);
+            g->setDrawingMode(QSGGeometry::DrawTriangles);
+            n->setGeometry(g);
+            n->setFlag(QSGNode::OwnsGeometry);
+            auto *m = new FlyMaskMaterial;
+            m->sprite = m_texture;
+            n->setMaterial(m);
+            n->setFlag(QSGNode::OwnsMaterial);
+            root->appendChildNode(n);
+        }
     }
-
-    // --- the bin icon, on top ------------------------------------------
-    auto *im = static_cast<QSGTextureMaterial *>(iconNode->material());
+    // Draw order: behind the bin, then clipped-to-it (crawlers), then in
+    // front. Three batches, three draw calls, one texture.
+    auto *behind  = static_cast<QSGGeometryNode *>(root->childAtIndex(0));
+    auto *surface = static_cast<QSGGeometryNode *>(root->childAtIndex(1));
+    auto *front   = static_cast<QSGGeometryNode *>(root->childAtIndex(2));
+    // --- the bin mask ---------------------------------------------------
+    auto *matBehind  = static_cast<FlyMaskMaterial *>(behind->material());
+    auto *matSurface = static_cast<FlyMaskMaterial *>(surface->material());
+    auto *matFront   = static_cast<FlyMaskMaterial *>(front->material());
     if (m_binIconDirty) {
         m_binIconDirty = false;
-        delete im->texture();
-        im->setTexture(m_binIcon.isNull()
-                           ? nullptr
-                           : window()->createTextureFromImage(
-                                 m_binIcon, QQuickWindow::TextureHasAlphaChannel));
+        delete m_maskTexture;
+        m_maskTexture = m_binIcon.isNull()
+            ? nullptr
+            : window()->createTextureFromImage(m_binIcon,
+                                               QQuickWindow::TextureHasAlphaChannel);
+        matBehind->mask = m_maskTexture;
+        matSurface->mask = m_maskTexture;
     }
-    QSGGeometry *ig = iconNode->geometry();
-    if (im->texture() && !m_binRect.isEmpty()) {
-        ig->allocate(6);
-        auto *iv = ig->vertexDataAsTexturedPoint2D();
-        // Dock artwork is square, but the Accessibility rect for the tile
-        // isn't (40x28 on a standard Dock) — drawing into it directly
-        // squashes the bin. Draw a square centred on the rect instead.
-        const QPointF ic = m_binRect.center();
-        const float side = float(qMax(m_binRect.width(), m_binRect.height()));
-        const float l = float(ic.x()) - side / 2, t = float(ic.y()) - side / 2;
-        const float r = l + side, b = t + side;
-        iv[0].set(l, t, 0, 0); iv[1].set(r, t, 1, 0); iv[2].set(r, b, 1, 1);
-        iv[3].set(l, t, 0, 0); iv[4].set(r, b, 1, 1); iv[5].set(l, b, 0, 1);
-    } else {
-        ig->allocate(0);
+    const bool dbg = qEnvironmentVariableIsSet("HYPERBIN_SHOW_BINRECT");
+    matBehind->binRect = m_binRect;
+    matBehind->debugRect = dbg;
+    matBehind->maskMode = 1;           // hidden where the bin is
+    matSurface->binRect = m_binRect;
+    matSurface->debugRect = false;
+    matSurface->maskMode = 2;          // clipped TO the bin
+    matFront->mask = nullptr;          // front flies are never occluded
+    matFront->binRect = QRectF();
+    matFront->debugRect = false;
+    matFront->maskMode = 0;
+    behind->markDirty(QSGNode::DirtyMaterial);
+    surface->markDirty(QSGNode::DirtyMaterial);
+    front->markDirty(QSGNode::DirtyMaterial);
+
+    // --- calibration ------------------------------------------------------
+    // MUST come after the mask texture is (re)created below-of-here in
+    // program order: running it first meant these materials captured a
+    // pointer to m_maskTexture that the mask update then deleted, and
+    // the next frame drew from freed memory (SIGSEGV).
+    // HYPERBIN_CALIBRATE=x|y draws the mask silhouette at five candidate
+    // offsets at once, each a different colour, so which one fits is a
+    // single human judgement instead of an automated measurement.
+    //
+    // That indirection exists because measuring this from screenshots has
+    // proved unreliable over and over: screencapture clips at display
+    // edges, the Dock shifts between probe and capture, the app's own
+    // flies sit on the icon, and the shape fitter locks onto the opaque
+    // folder above because the trash itself is semi-transparent. An eye
+    // has none of those failure modes.
+    const QByteArray calAxis = qgetenv("HYPERBIN_CALIBRATE");
+    if (!calAxis.isEmpty() && !m_binRect.isEmpty()) {
+        // Range comes from HYPERBIN_CALIBRATE=x8 / y6 etc; the first
+        // sweep sat entirely off the bin, so a fixed +/-4 was useless.
+        // Sweep scales with the icon by default: a fixed span in points
+        // is a wide spread over a 22pt bin and a barely-visible nudge
+        // over an 87pt one. An explicit number still overrides it.
+        // Scale sweep is in percent; position sweeps are in points and
+        // scale with the icon.
+        float span = calAxis.startsWith('s')
+            ? 8.0f
+            : 0.11f * float(qMin(m_binRect.width(), m_binRect.height()));
+        {
+            const QByteArray n = calAxis.mid(1);
+            if (!n.isEmpty() && n.toFloat() > 0) span = n.toFloat();
+        }
+        span = qMax(span, 1.0f);
+        const float kCand[5] = {-span, -span * 0.5f, 0.0f, span * 0.5f, span};
+        static const float kCols[5][4] = {
+            {1.0f, 0.15f, 0.15f, 1.0f},  // red    -4
+            {1.0f, 0.65f, 0.0f,  1.0f},  // orange -2
+            {0.1f, 0.9f,  0.2f,  1.0f},  // green   0
+            {0.2f, 0.6f,  1.0f,  1.0f},  // blue   +2
+            {0.85f, 0.3f, 1.0f,  1.0f},  // violet +4
+        };
+        // Three sweep modes. 's' scales the mask about its centre — if a
+        // position sweep never lines up at either extreme, the error is
+        // size, and no amount of translating will fix it.
+        const bool xAxis  = calAxis.startsWith('x');
+        const bool sAxis  = calAxis.startsWith('s');
+        static bool legend = false;
+        if (!legend) { legend = true;
+            const char *unit = sAxis ? "%% size" : "pt";
+            qInfo("calibrate %s over icon %.0fx%.0f: red=%+.1f%s orange=%+.1f%s "
+                  "green=0 blue=%+.1f%s violet=%+.1f%s",
+                  sAxis ? "scale" : (xAxis ? "dx" : "dy"),
+                  m_binRect.width(), m_binRect.height(),
+                  -span, unit, -span*0.5f, unit, span*0.5f, unit, span, unit); }
+        while (root->childCount() < 3 + 5) {
+            auto *n = new QSGGeometryNode;
+            auto *g2 = new QSGGeometry(QSGGeometry::defaultAttributes_TexturedPoint2D(), 0);
+            g2->setDrawingMode(QSGGeometry::DrawTriangles);
+            n->setGeometry(g2);
+            n->setFlag(QSGNode::OwnsGeometry);
+            auto *m2 = new FlyMaskMaterial;
+            m2->sprite = m_texture;
+            n->setMaterial(m2);
+            n->setFlag(QSGNode::OwnsMaterial);
+            root->appendChildNode(n);
+        }
+        for (int ci = 0; ci < 5; ++ci) {
+            auto *n = static_cast<QSGGeometryNode *>(root->childAtIndex(3 + ci));
+            auto *m2 = static_cast<FlyMaskMaterial *>(n->material());
+            QRectF r;
+            if (sAxis) {
+                // kCand is a percentage here, not points.
+                const qreal f2 = 1.0 + kCand[ci] / 100.0;
+                const QPointF ctr = m_binRect.center();
+                r = QRectF(0, 0, m_binRect.width() * f2, m_binRect.height() * f2);
+                r.moveCenter(ctr);
+            } else {
+                r = m_binRect.translated(xAxis ? kCand[ci] : 0.0,
+                                         xAxis ? 0.0 : kCand[ci]);
+            }
+            m2->mask = m_maskTexture;
+            m2->binRect = r;
+            m2->debugRect = true;
+            memcpy(m2->debugRGBA, kCols[ci], sizeof(kCols[ci]));
+            auto *g2 = n->geometry();
+            g2->allocate(6);
+            auto *v2 = g2->vertexDataAsTexturedPoint2D();
+            const float l = float(r.left()), t = float(r.top());
+            const float rr = float(r.right()), b = float(r.bottom());
+            v2[0].set(l, t, 0, 0); v2[1].set(rr, t, 1, 0); v2[2].set(rr, b, 1, 1);
+            v2[3].set(l, t, 0, 0); v2[4].set(rr, b, 1, 1); v2[5].set(l, b, 0, 1);
+            n->markDirty(QSGNode::DirtyGeometry | QSGNode::DirtyMaterial);
+        }
     }
-    iconNode->markDirty(QSGNode::DirtyGeometry | QSGNode::DirtyMaterial);
 
-    // --- the swarm, underneath -----------------------------------------
-    QSGGeometry *g = swarm->geometry();
-    g->allocate(flies.size() * kVertsPerFly);
-    auto *v = g->vertexDataAsTexturedPoint2D();
 
-    int i = 0;
+    // --- the swarm ------------------------------------------------------
+    // HYPERBIN_SHOW_BINRECT draws one extra quad over binRect so the mask
+    // region is directly visible on screen. Inferring its position from
+    // screenshots proved unreliable; this shows it.
+    const bool showRect = dbg && !m_binRect.isEmpty();
+
+    int nBehind = showRect ? 1 : 0, nSurface = 0, nFront = 0;
+    for (const Fly &f : flies) {
+        if (f.onSurface)    ++nSurface;
+        else if (f.inFront) ++nFront;
+        else                ++nBehind;
+    }
+
+    QSGGeometry *g  = behind->geometry();
+    QSGGeometry *gs = surface->geometry();
+    QSGGeometry *gf = front->geometry();
+    g->allocate(nBehind * kVertsPerFly);
+    gs->allocate(nSurface * kVertsPerFly);
+    gf->allocate(nFront * kVertsPerFly);
+    auto *vb = g->vertexDataAsTexturedPoint2D();
+    auto *vs = nSurface ? gs->vertexDataAsTexturedPoint2D() : nullptr;
+    auto *vf = nFront ? gf->vertexDataAsTexturedPoint2D() : nullptr;
+
+    int i = 0, js = 0, jf = 0;
+    if (showRect) {
+        const float l = float(m_binRect.left()),  t = float(m_binRect.top());
+        const float r = float(m_binRect.right()), b = float(m_binRect.bottom());
+        vb[i++].set(l, t, 0, 0); vb[i++].set(r, t, 1, 0); vb[i++].set(r, b, 1, 1);
+        vb[i++].set(l, t, 0, 0); vb[i++].set(r, b, 1, 1); vb[i++].set(l, b, 0, 1);
+    }
     for (const Fly &f : flies) {
         // Wingbeat squashes the sprite across its heading — at any frame
         // rate it's the difference between "a dot" and "a fly".
-        const float beat = 0.82f + 0.18f * std::sin(f.phase);
+        // No whole-sprite squash any more — the wings do the work.
+        const float beat = 1.0f;
         // Size off the icon, not a constant: Dock magnification and the
         // user's Dock-size setting both change the tile, and fixed-size
         // flies next to a magnified bin look wrong.
-        // Arrival/departure rides on size rather than alpha: a textured
-        // material has no per-vertex opacity, and one QSGOpacityNode per
-        // fly would cost more than the effect is worth. Shrinking away
-        // reads as the fly receding, which suits it.
-        const float k    = m_sim.sizeScale();
-        const float fade = 0.35f + 0.65f * f.fade;
-        const float hw   = 3.5f * f.scale * k * fade;
-        const float hh   = 3.5f * f.scale * beat * k * fade;
+        // No size ramp on arrival/departure. Scaling a fly in and out
+        // reads as it changing size for no reason — there's nothing in
+        // the scene to interpret it as distance — and at ~2pt the pop it
+        // was hiding isn't visible anyway.
+        // Render scale is NOT the sim's scale below a 40pt tile. Motion
+        // must stay proportional — a fly crossing a small bin has to
+        // cross a small distance — but the sprite is only ~2pt across at
+        // k=1, so at a 16pt Dock tile (k=0.4) it lands under a pixel and
+        // disappears. The floor lifts small sizes only: at k>=1 this is
+        // exactly k, so the large sizes that already look right are
+        // untouched.
+        const float k  = m_sim.sizeScale();
+        const float rk = qMax(k, 0.72f + 0.28f * k);
+        const float fade = 1.0f;
+        const float hw   = 2.05f * f.scale * rk * fade;
+        const float hh   = 2.05f * f.scale * beat * rk * fade;
         const float x    = float(f.pos.x());
         const float y    = float(f.pos.y());
 
@@ -236,15 +384,25 @@ QSGNode *FlyItem::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
                                     : f.wanderAngle;
         const float ca = std::cos(ang), sa = std::sin(ang);
 
+        // Pick the wing frame. phase advances slowly while crawling and
+        // fast in flight (FlySim), so the same expression gives a gentle
+        // bob on the bin and a blur of wings in the air.
+        const int frame = int(f.phase) % kFlyFrames;
+        const float u0 = float(frame) / kFlyFrames;
+        const float u1 = float(frame + 1) / kFlyFrames;
+        auto *dst = f.onSurface ? vs : (f.inFront ? vf : vb);
+        int  &idx = f.onSurface ? js : (f.inFront ? jf : i);
         auto put = [&](float lx, float ly, float u, float w) {
-            v[i].set(x + lx * ca - ly * sa, y + lx * sa + ly * ca, u, w);
-            ++i;
+            dst[idx].set(x + lx * ca - ly * sa, y + lx * sa + ly * ca, u, w);
+            ++idx;
         };
-        put(-hw, -hh, 0, 0); put(hw, -hh, 1, 0); put(hw, hh, 1, 1);
-        put(-hw, -hh, 0, 0); put(hw, hh, 1, 1); put(-hw, hh, 0, 1);
+        put(-hw, -hh, u0, 0); put(hw, -hh, u1, 0); put(hw, hh, u1, 1);
+        put(-hw, -hh, u0, 0); put(hw, hh, u1, 1); put(-hw, hh, u0, 1);
     }
 
-    swarm->markDirty(QSGNode::DirtyGeometry);
+    behind->markDirty(QSGNode::DirtyGeometry);
+    surface->markDirty(QSGNode::DirtyGeometry);
+    front->markDirty(QSGNode::DirtyGeometry);
     return root;
 }
 

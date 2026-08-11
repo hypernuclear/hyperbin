@@ -91,10 +91,82 @@ int main()
             double(crawlSamples) / std::max(1, crawlSamples + flySamples);
         std::printf("mode mix: %.0f%% crawling, %.0f%% flying\n",
                     crawlShare * 100, (1 - crawlShare) * 100);
-        if (crawlShare < 0.15 || crawlShare > 0.85)
-            return fail("one movement mode dominates; the mix looks wrong");
+        // Flying is meant to dominate — crawling is an occasional visit
+        // to the bin, not the default state. Still has to happen though.
+        if (crawlShare < 0.05 || crawlShare > 0.45)
+            return fail("movement mix is wrong; flying should dominate "
+                        "but crawling must still occur");
     }
 
+    // --- flies fade in and out clear of the bin ----------------------
+    // A fly winking out over the icon reads as it ceasing to exist; the
+    // bin behind it is a fixed reference the eye anchors on.
+    {
+        const qreal side = 40.0;
+        const QRectF bin(500, 500, side, side * 0.7);
+        FlySim s = makeSim(side, 1.0f, 31337);
+        int over = 0, lv = 0, ar = 0, tot = 0;
+        for (int i = 0; i < 2400; ++i) { // 120s
+            s.step(0.05f);
+            for (const Fly &f : s.flies()) {
+                ++tot;
+                if (f.fade < 0.85f && bin.contains(f.pos))
+                    { ++over; (f.leaving ? lv : ar)++; }
+            }
+        }
+        const double share = double(over) / std::max(1, tot);
+        std::printf("mid-fade over the bin: %.1f%% of samples (leaving %d, arriving %d)\n",
+                    share * 100, lv, ar);
+        // Not zero, and shouldn't be forced to zero: `bin` is the Dock's
+        // square tile, which is larger than the drawn bin, so a fly
+        // clipping its corner is usually over empty pixels. What this
+        // guards is the regression where flies routinely materialise and
+        // wink out against the icon.
+        if (share > 0.02) return fail("flies appear or vanish on top of the bin");
+    }
+    // --- no stalled fliers -------------------------------------------
+    // A fly whose velocity collapses spins on the spot: the sprite's
+    // heading comes from the velocity vector, so at near-zero speed tiny
+    // changes swing it wildly. The cause has always been two steering
+    // terms cancelling — most recently the outward push for fading flies
+    // against the containment shove.
+    {
+        FlySim s = makeSim(40, 1.0f, 8191);
+        int stalled = 0, flying = 0;
+        for (int i = 0; i < 2400; ++i) {
+            s.step(0.05f);
+            for (const Fly &f : s.flies()) {
+                if (f.mode != FlyMode::Flying || f.leaving) continue;
+                ++flying;
+                if (std::hypot(f.vel.x(), f.vel.y()) < 0.15 * 52.0) ++stalled;
+            }
+        }
+        const double share = double(stalled) / std::max(1, flying);
+        std::printf("stalled fliers: %.1f%% of flying samples\n", share * 100);
+        if (share > 0.08) return fail("fliers stall and spin on the spot");
+    }
+    // --- nothing passes under the bin --------------------------------
+    // The bin rests on the floor of the Dock. A fly drawn behind it, or
+    // crawling on it, must never be below its bottom edge — there is no
+    // space there to move through, so the silhouette can only be entered
+    // or left at the left, top or right.
+    {
+        const qreal side = 40.0;
+        const QRectF bin(500, 500, side, side * 0.7);
+        FlySim s = makeSim(side, 1.0f, 2027);
+        int under = 0;
+        for (int i = 0; i < 2400; ++i) {
+            s.step(0.05f);
+            for (const Fly &f : s.flies()) {
+                if (f.inFront && !f.onSurface) continue;   // in front: fine
+                if (std::abs(f.pos.x() - bin.center().x()) >= bin.width() * 0.5)
+                    continue;                              // clear of the icon
+                if (f.pos.y() > bin.bottom() + 0.5) ++under;
+            }
+        }
+        std::printf("occluded flies under the bin: %d\n", under);
+        if (under > 0) return fail("flies pass under the bin, through the Dock floor");
+    }
     // --- containment: must fit the asymmetric overlay margins ---
     for (qreal side : {28.0, 40.0, 95.0}) {
         FlySim s = makeSim(side, 1.0f, 4242);

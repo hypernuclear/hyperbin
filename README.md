@@ -118,6 +118,13 @@ VS Code: `.vscode/launch.json` has all three as debug configs.
 ## Known gaps
 
 - **Windows has no backend yet** — still the stub.
+- **The mask lags the Dock by a frame.** Flies pass behind the bin via a
+  shader that erases them where the Trash artwork is opaque
+  (`shaders/flymask.*`). Its position comes from the Accessibility poll,
+  which is one frame behind during Dock magnification, so flies are
+  hidden a few pixels off. Barely perceptible — and far better than the
+  copy-the-icon approach it replaced, where the same lag showed as a
+  visibly desynced duplicate bin.
 - **Only `~/.Trash`.** Items trashed from other volumes live in
   `/Volumes/<x>/.Trashes/<uid>` and aren't counted.
 - **Polling, not notifications.** The icon is polled at 50ms while on

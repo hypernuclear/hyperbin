@@ -20,8 +20,6 @@
       "program": "${command:cmake.launchTargetPath}",
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
-      "visualizerFile": "${command:qt-cpp.natvis}",
-      "showDisplayString": true,
       "environment": [
         // NOTE: HYPERBIN_SHOW_BINRECT / HYPERBIN_BIN_ADJUST belong on the
         // Overlay config, not here — windowed mode never touches the Dock.
@@ -44,6 +42,12 @@
         }
       },
       "windows": {
+        // Qt's debugger visualisers are MSVC-only, so they live here
+        // rather than at the top level: evaluating them on macOS makes
+        // the Qt extension demand a Qt path from the CMake presets and
+        // block the launch.
+        "visualizerFile": "${command:qt-cpp.natvis}",
+        "showDisplayString": true,
         "environment": [
           {
             "name": "PATH",
@@ -72,8 +76,6 @@
       "program": "${command:cmake.launchTargetPath}",
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
-      "visualizerFile": "${command:qt-cpp.natvis}",
-      "showDisplayString": true,
       "environment": [
         // cppdbg wants {"name","value"} pairs and silently ignores any
         // other shape, so {"VAR": "1"} looks right and does nothing.
@@ -94,6 +96,12 @@
         }
       },
       "windows": {
+        // Qt's debugger visualisers are MSVC-only, so they live here
+        // rather than at the top level: evaluating them on macOS makes
+        // the Qt extension demand a Qt path from the CMake presets and
+        // block the launch.
+        "visualizerFile": "${command:qt-cpp.natvis}",
+        "showDisplayString": true,
         "environment": [
           {
             "name": "PATH",
@@ -120,8 +128,6 @@
       "program": "${command:cmake.launchTargetPath}",
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
-      "visualizerFile": "${command:qt-cpp.natvis}",
-      "showDisplayString": true,
       "environment": [],
       "args": [
         "--windowed",
@@ -140,6 +146,12 @@
         }
       },
       "windows": {
+        // Qt's debugger visualisers are MSVC-only, so they live here
+        // rather than at the top level: evaluating them on macOS makes
+        // the Qt extension demand a Qt path from the CMake presets and
+        // block the launch.
+        "visualizerFile": "${command:qt-cpp.natvis}",
+        "showDisplayString": true,
         "environment": [
           {
             "name": "PATH",

@@ -69,21 +69,29 @@ overlay margin to 95px.
    `kAXSizeAttribute`. Needs the Accessibility permission; onboarding
    must explain it before triggering the prompt. Item count from
    `~/.Trash` + per-volume `/.Trashes/<uid>` via FSEvents.
-2. **`RecycleBinTarget` (Windows).** Count and size from
-   `SHQueryRecycleBin`, change events via `SHChangeNotifyRegister` on the
-   bin PIDL — both clean public APIs. Icon rect is the hard part:
-   `Progman`/`WorkerW` → `SHELLDLL_DefView` → `SysListView32`, then
-   `LVM_GETITEMPOSITION` cross-process. Validate on real hardware early;
-   it trips AV heuristics and breaks under auto-arrange and mixed DPI.
-3. **Overlay z-order.** macOS: `NSWindow` level above
-   `kCGDockWindowLevel`. Windows: parent into the desktop layer so real
-   windows occlude it, rather than sitting topmost over everything.
-4. **Onboarding.** Detect a hidden Recycle Bin
+2. ~~**`RecycleBinTarget` (Windows).**~~ Built — see
+   `docs/windows-backend.md`. Count and size come from
+   `SHQueryRecycleBin` and change events from `SHChangeNotifyRegister`,
+   as planned. The icon rect does **not** use `LVM_GETITEMPOSITION`:
+   that needs `ReadProcessMemory` inside explorer.exe, which is the
+   heuristic that gets an unknown signed download quarantined. It uses
+   `IShellWindows` → `IFolderView2::GetItemPosition` instead —
+   documented, injection-free, and it reports the icon size too.
+3. ~~**Overlay z-order.**~~ Built. macOS: `NSWindow` level above
+   `kCGDockWindowLevel`. Windows is **not** parented into the desktop
+   layer: `SetParent` under `Progman`/`WorkerW` puts the overlay behind
+   the icons permanently, which kills the in-front batch, the landings
+   on the front of the bin, and the 4:1 front/behind split. It is
+   topmost + click-through, hidden whenever the desktop is not actually
+   visible at the bin — which also covers full-screen apps and games for
+   free.
+4. **Onboarding.** A hidden Recycle Bin is detected
    (`HKCU\...\HideDesktopIcons\NewStartPanel`, CLSID
-   `{645FF040-5081-101B-9F08-00AA002F954E}`) and walk the user through
-   enabling it — offer to set it with consent rather than silently
-   writing to their desktop settings. macOS: explain Accessibility
-   before prompting.
+   `{645FF040-5081-101B-9F08-00AA002F954E}`, watched with
+   `RegNotifyChangeKeyValue`) and surfaced in the tray with a line that
+   opens Desktop Icon Settings. Deliberately not written for the user.
+   Still to do: the first-run walkthrough itself, and explaining
+   Accessibility on macOS before prompting.
 5. **Power verification** on real hardware — `powermetrics` /
    PowerCfg. Non-negotiable before ship.
 6. **Art.** Swap the vertex-coloured quads for a textured sprite atlas;
@@ -95,5 +103,15 @@ overlay margin to 95px.
   and the Recycle Bin can be hidden or dragged anywhere. Decide whether
   the Windows build degrades to a floating desktop companion when the
   icon can't be found.
-- The Explorer memory-read technique is the single biggest unknown in
-  the project. Prototype it before designing around it.
+- ~~The Explorer memory-read technique is the single biggest unknown in
+  the project.~~ Retired: nothing reads explorer's memory. `IFolderView2`
+  gives the same numbers through a documented interface. What it costs
+  instead is an integrity-level constraint — an elevated hyperbin cannot
+  reach explorer over COM at all, so `start()` checks and says so.
+- ~~**The icon rect model is calibrated, not derived.**~~ Now measured:
+  `binprobe --measure` template-matches the shell's artwork against the
+  screen and the model reproduces it exactly (mean error 0.1/255) on a
+  150% display. Two assumptions died doing it — the reported position is
+  the icon's top-left rather than the cell's, and the reported icon size
+  is logical while positions are physical. Both remain worth re-measuring
+  on a 100% display and at other icon sizes, which is one command.

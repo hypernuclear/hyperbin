@@ -5,6 +5,8 @@
 
 #if defined(Q_OS_MACOS)
 #include "DockTrashTarget.h"
+#elif defined(Q_OS_WIN)
+#include "RecycleBinTarget.h"
 #endif
 
 namespace hyperbin {
@@ -18,9 +20,7 @@ std::unique_ptr<TrashTarget> TrashTarget::create(QObject *parent)
 #if defined(Q_OS_MACOS)
     return std::make_unique<DockTrashTarget>(parent);
 #elif defined(Q_OS_WIN)
-    // TODO(HYP-252): RecycleBinTarget — SHQueryRecycleBin for the count,
-    // desktop list view for the icon rect.
-    return std::make_unique<StubTrashTarget>(parent);
+    return std::make_unique<RecycleBinTarget>(parent);
 #else
     return std::make_unique<StubTrashTarget>(parent);
 #endif

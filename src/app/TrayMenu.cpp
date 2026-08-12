@@ -169,6 +169,13 @@ void TrayMenu::build()
     m_status = m_menu->addAction(QString());
     m_status->setEnabled(false);
 
+    // Hidden until something is actually wrong. Sits directly under the
+    // status line so the two read as one sentence: what is in the bin,
+    // and why you cannot see anything happening at it.
+    m_problem = m_menu->addAction(QString());
+    m_problem->setVisible(false);
+    connect(m_problem, &QAction::triggered, this, &TrayMenu::remediationRequested);
+
     m_menu->addSeparator();
 
     m_enable = m_menu->addAction(QStringLiteral("Show Animation"));
@@ -267,6 +274,17 @@ void TrayMenu::setStatusText(const QString &text)
 {
     if (m_status)
         m_status->setText(text);
+}
+
+void TrayMenu::setProblem(const QString &text, bool actionable)
+{
+    if (!m_problem)
+        return;
+    m_problem->setText(text);
+    m_problem->setVisible(!text.isEmpty());
+    // A greyed-out line still explains itself; it just doesn't pretend to
+    // be a button when there is nothing for it to open.
+    m_problem->setEnabled(actionable);
 }
 
 } // namespace hyperbin

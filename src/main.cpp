@@ -14,6 +14,8 @@
 
 #if defined(Q_OS_MACOS)
 #include "platform/MacOverlay.h"
+#elif defined(Q_OS_WIN)
+#include "platform/WinOverlay.h"
 #endif
 
 using namespace hyperbin;
@@ -61,17 +63,47 @@ int main(int argc, char **argv)
     if (windowed)
         return app.exec();
 
-#if defined(Q_OS_MACOS)
-    // Above the Dock, click-through, on every Space. Must happen before
-    // the window is first shown or the level change flickers.
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    // Click-through and above what it sits on. Must happen before the
+    // window is first shown or the level change flickers. Both backends
+    // declare the same call; what it has to arrange differs completely.
     configureOverlayWindow(win);
 #endif
 
+#if defined(Q_OS_WIN)
+    // The Dock is always on top; the desktop is always underneath. So on
+    // Windows there is a second reason not to draw that macOS never has:
+    // the bin is there, visible in principle, and buried under whatever
+    // the user is working in. Feeding it into the SAME targetVisible flag
+    // means a covered desktop costs exactly what an auto-hidden Dock
+    // costs, which is nothing.
+    DesktopWatcher desktop;
+    desktop.setOverlay(win);
+#endif
+    bool desktopVisible = true;
+
+    // Two independent reasons the target may be unusable, one flag. Both
+    // have to be re-evaluated together, or whichever changed last wins and
+    // the other is forgotten.
+    auto applyTargetVisible = [&] {
+        power.setTargetVisible(target->status() == TrashTarget::Status::Ok
+                               && desktopVisible);
+    };
+#if defined(Q_OS_WIN)
+    QObject::connect(&desktop, &DesktopWatcher::desktopVisibleChanged, &power,
+                     [&](bool visible) {
+        desktopVisible = visible;
+        applyTargetVisible();
+    });
+#endif
+
     // The trash icon can be present but unreachable — an auto-hidden Dock
-    // parks it off-screen. Don't render at something the user can't see.
+    // parks it off-screen, and on Windows it can be switched off entirely
+    // in Desktop Icon Settings. Don't render at something the user can't
+    // see.
     QObject::connect(target.get(), &TrashTarget::statusChanged, &power,
                      [&](TrashTarget::Status s) {
-        power.setTargetVisible(s == TrashTarget::Status::Ok);
+        applyTargetVisible();
         if (s == TrashTarget::Status::PermissionRequired)
             qInfo("hyperbin: waiting for Accessibility. The system prompt is showing; "
                   "tracking starts as soon as it's granted, no restart needed.");
@@ -144,6 +176,12 @@ int main(int argc, char **argv)
         win->setGeometry(r.adjusted(-mx, -mtop, mx, mbot));
         fly->setBinRect(QRectF(mx, mtop, r.width(), r.height()));
         fly->setSize(QSizeF(win->width(), win->height()));
+#if defined(Q_OS_WIN)
+        // Test occlusion at the bin itself, not at the overlay's corner:
+        // the margins reach well above the icon, and a window covering
+        // only the flight room is not covering the bin.
+        desktop.setPoint(r.center());
+#endif
 
         // Flies pass behind the bin: our own copy of the Trash artwork is
         // composited over the swarm. This only works because iconRect()
@@ -200,6 +238,41 @@ int main(int argc, char **argv)
     QObject::connect(target.get(), &TrashTarget::byteSizeChanged, &tray,
                      [&](qint64) { refreshStatus(); });
 
+    // Nothing is drawing, and why. The alternative is a console warning
+    // nobody sees, in an app whose only UI is this menu.
+    //
+    // Windows differs from macOS in a way worth saying out loud here:
+    // there is no permission to grant. A hidden Recycle Bin is a setting,
+    // so the app can go from broken to working without a restart or a
+    // system prompt — the fix is one checkbox, and this is the line that
+    // opens the dialog holding it.
+    auto refreshProblem = [&] {
+        switch (target->status()) {
+        case TrashTarget::Status::Ok:
+            tray.setProblem(QString(), false);
+            break;
+        case TrashTarget::Status::PermissionRequired:
+            tray.setProblem(QStringLiteral("Needs Accessibility — open Settings"), true);
+            break;
+        case TrashTarget::Status::IconHidden:
+#if defined(Q_OS_WIN)
+            tray.setProblem(QStringLiteral("Recycle Bin is hidden — show it"), true);
+#else
+            // An auto-hidden Dock isn't broken, and there is no settings
+            // pane that would "fix" it, so this one only explains itself.
+            tray.setProblem(QStringLiteral("Trash icon is off screen"), false);
+#endif
+            break;
+        case TrashTarget::Status::NotFound:
+            tray.setProblem(QStringLiteral("Can't find the trash icon"), false);
+            break;
+        }
+    };
+    QObject::connect(target.get(), &TrashTarget::statusChanged, &tray,
+                     [&](TrashTarget::Status) { refreshProblem(); });
+    QObject::connect(&tray, &TrayMenu::remediationRequested, &app,
+                     [&] { target->openRemediation(); });
+
     // --- master switch ----------------------------------------------------
     // Off means genuinely off: no frames, no overlay surface, and the
     // trash poll stopped as well. Leaving the poll running would be a
@@ -209,13 +282,19 @@ int main(int argc, char **argv)
         if (on) {
             target->start();
             power.setBinEmpty(target->itemCount() == 0);
-            power.setTargetVisible(target->status() == TrashTarget::Status::Ok);
+            applyTargetVisible();
         } else {
             target->stop();
             if (win)
                 win->setVisible(false);
         }
+#if defined(Q_OS_WIN)
+        // Off means off: the occlusion hook and its poll go too, rather
+        // than sitting there answering a question nothing is asking.
+        desktop.setEnabled(on);
+#endif
         refreshStatus();
+        refreshProblem();
     };
     QObject::connect(&settings, &Settings::enabledChanged, &app,
                      [&](bool on) { applyEnabled(on); });

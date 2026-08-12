@@ -10,8 +10,17 @@ its own signing identity, its own updater feed.
 
 macOS works end to end: the overlay sits above the Dock, tracks the real
 Trash icon through magnification, and the swarm grows with the item
-count. Windows is still a stub. See `docs/architecture.md` for the
-decisions and `docs/battery.md` for the power budget.
+count.
+
+Windows works too — `RecycleBinTarget` finds the bin through the
+desktop's shell view, reads count *and* size from `SHQueryRecycleBin`,
+and the overlay hides itself whenever a window covers the desktop at the
+bin. The icon rect is calibrated by measurement rather than by eye:
+`binprobe --measure` matches the shell's own artwork against the screen
+and prints where the icon really is. See `docs/windows-backend.md`.
+
+See `docs/architecture.md` for the decisions and `docs/battery.md` for
+the power budget.
 
 ## Build
 

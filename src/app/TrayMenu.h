@@ -30,8 +30,18 @@ public:
     /// Text shown under the type submenu, e.g. how much is in the bin.
     void setStatusText(const QString &text);
 
+    /// Say what is wrong and, when `actionable`, offer to fix it. Empty
+    /// text hides the line entirely.
+    ///
+    /// A background agent with no window has nowhere else to say "I can
+    /// see the trash but I can't draw at it" — without this the app is
+    /// simply, silently, doing nothing.
+    void setProblem(const QString &text, bool actionable);
+
 signals:
     void quitRequested();
+    /// The problem line was clicked: open whatever fixes it.
+    void remediationRequested();
 
 private:
     void build();
@@ -49,6 +59,7 @@ private:
     std::unique_ptr<QMenu>           m_menu;
     QAction      *m_enable    = nullptr;
     QAction      *m_status    = nullptr;
+    QAction      *m_problem   = nullptr;
     QActionGroup *m_typeGroup = nullptr;
     QActionGroup *m_densityGroup   = nullptr;
     QActionGroup *m_thresholdGroup = nullptr;

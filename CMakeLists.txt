@@ -103,6 +103,12 @@ qt_add_executable(hyperbin
     src/platform/StubTrashTarget.h
     $<$<PLATFORM_ID:Darwin>:src/platform/DockTrashTarget.mm>
     $<$<PLATFORM_ID:Darwin>:src/platform/MacOverlay.mm>
+    $<$<PLATFORM_ID:Windows>:src/platform/RecycleBinTarget.cpp>
+    $<$<PLATFORM_ID:Windows>:src/platform/RecycleBinTarget.h>
+    $<$<PLATFORM_ID:Windows>:src/platform/WinOverlay.cpp>
+    $<$<PLATFORM_ID:Windows>:src/platform/WinOverlay.h>
+    $<$<PLATFORM_ID:Windows>:src/platform/WinScreen.cpp>
+    $<$<PLATFORM_ID:Windows>:src/platform/WinScreen.h>
     src/render/FlyItem.cpp
     src/render/FlyItem.h
     src/render/FlyMaskMaterial.cpp
@@ -184,5 +190,12 @@ if(APPLE)
         MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/Info.plist.in)
 elseif(WIN32)
     set_target_properties(hyperbin PROPERTIES WIN32_EXECUTABLE TRUE)
-    target_link_libraries(hyperbin PRIVATE shell32 user32)
+    # shell32/ole32/uuid: the desktop shell view and the Recycle Bin's own
+    # artwork. gdi32: turning that artwork's HBITMAP into a QImage.
+    # dwmapi: DWMWA_CLOAKED, which is how a window that is "visible" but
+    # not really on screen is told apart from one that covers the bin.
+    # shcore: GetDpiForMonitor, which is how physical shell coordinates
+    # become Qt's device-independent ones on a mixed-DPI desktop.
+    target_link_libraries(hyperbin PRIVATE
+        shell32 user32 ole32 oleaut32 uuid shlwapi gdi32 dwmapi advapi32 shcore)
 endif()

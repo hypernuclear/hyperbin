@@ -65,6 +65,10 @@ private:
     /// Cursor in item-local pixels, and whether it is over the bin.
     QPointF cursorLocal() const;
     void    setScattered(bool s);
+    /// Turn the bin artwork into the coarse walkable-surface grid the
+    /// sim needs. See the note in the implementation — this is what keeps
+    /// "landed" in the sim and "visible" on screen meaning the same thing.
+    void    rebuildSurface();
     /// Cheap poll that runs ONLY while scattered, purely to notice the
     /// pointer leaving. Rendering is stopped then, so without it nothing
     /// would ever wake the swarm back up.

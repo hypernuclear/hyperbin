@@ -33,6 +33,10 @@ enum class FlyMode { Flying, Crawling };
 
 struct Fly
 {
+    /// Stable for the fly's whole life. The vector index is not — flies
+    /// are removed from the middle — so anything following one fly over
+    /// time (debugging, tests) needs this.
+    quint32 id = 0;
     QPointF pos;         // px, overlay-local
     QPointF vel;         // px/sec
     float   wanderAngle; // rad, integrated per step for smooth heading drift
@@ -64,6 +68,13 @@ struct Fly
     /// straight into the velocity made flight twitch. Smoothing the
     /// DIRECTION rather than the velocity keeps the speed honest.
     QPointF dir;
+    /// Where on the bin this fly is heading to land. Chosen from the
+    /// silhouette, so it doesn't aim at a hole in the artwork.
+    QPointF landTarget;
+    /// Persistent walking direction. A crawler used to take its heading
+    /// from the noise field, which changes as fast as it moves, so it
+    /// pivoted constantly instead of walking anywhere.
+    float   walkAngle = 0.0f;
     /// Crawling pace, re-rolled every second or so. A crawler that moves
     /// at one steady speed reads as a machine; real ones surge and stall.
     float   pace     = 1.0f;
@@ -106,6 +117,23 @@ public:
     /// leaving fly positions alone makes the whole swarm jump away from
     /// the icon. Existing flies are translated and scaled to match.
     void setBinRect(const QRectF &r);
+
+    /// The bin's SILHOUETTE, as a coarse coverage grid over binRect —
+    /// 1 where the artwork is solid enough to stand on, 0 where it isn't.
+    ///
+    /// This exists because the sim and the renderer used to disagree
+    /// about what "on the bin" meant. The sim landed flies anywhere in
+    /// the bounding rect; the shader clips crawling flies to the artwork's
+    /// alpha. The artwork covers well under half of its own tile, so most
+    /// landed flies stood on empty tile and were clipped away — the sim
+    /// reported a busy bin and the screen showed an empty one.
+    ///
+    /// Pass an empty grid to fall back to the bounding rect (dev mode,
+    /// or before the icon has loaded).
+    void setSurface(const QVector<quint8> &coverage, int w, int h);
+
+    /// Is this point on the bin's actual surface?
+    bool onSurfaceAt(const QPointF &p) const;
     /// Cursor position in overlay-local pixels, and whether it's close
     /// enough to matter. Polled rather than delivered as events: the
     /// overlay is click-through, so it never receives hover at all.
@@ -181,7 +209,7 @@ public:
         float lifeMax        = 11.0f;
         float fadeTime       = 0.40f;  // arrival/departure ramp
 
-        float crawlSpeed     = 6.0f;   // px/sec — a slow potter
+        float crawlSpeed     = 9.0f;   // px/sec — a slow potter
         float flySpeed       = 104.0f;  // px/sec — actual flying
 
         // Flying is the default state; crawling is a brief visit. The
@@ -195,6 +223,12 @@ public:
         /// Chance of actually settling when a flier passes over the bin
         /// with its timer up. Below 1 so most passes stay airborne.
         float landChance     = 0.95f;
+        /// Flies that must be ON the bin at any moment, traffic
+        /// permitting. Independent per-fly timers alone can't hold a
+        /// population invariant: they drift, and the bin goes empty for
+        /// seconds at a time purely by chance.
+        int   minLanded      = 1;
+        int   preferLanded   = 2;
         // Stillness either side of the walk. A fly that lands and
         // immediately starts trundling reads as a machine on rails; the
         // pause is what makes the landing look like a decision.
@@ -206,9 +240,12 @@ public:
         // the bin is now several seconds, and pausing only on arrival and
         // departure left a long uninterrupted trundle in the middle —
         // which is the machine-on-rails look the pauses exist to avoid.
-        float restChance     = 0.020f; // per walking fly per step
-        float restMin        = 0.25f;
-        float restMax        = 1.10f;
+        float restChance     = 0.012f; // per walking fly per step
+        /// How fast a walking fly's heading drifts, in rad/s. Low: the
+        /// point is that it holds a line long enough to cover ground.
+        float walkWander     = 3.0f;
+        float restMin        = 0.20f;
+        float restMax        = 0.80f;
 
         // Crawling twitches: infrequent and small. At the previous rate
         // (0.12 / 26px) a crawling fly was in near-constant spasm rather
@@ -287,10 +324,22 @@ private:
     float  rndRange(float lo, float hi) { return lo + rnd() * (hi - lo); }
     void   spawnFly();
     void   enterMode(Fly &f, FlyMode m);
+    /// A point on the bin's surface, for a fly to aim at. Falls back to
+    /// the rect centre when no silhouette is known.
+    QPointF surfaceTarget();
+    /// Steer toward the surface, and hold the population of landed flies
+    /// at the configured floor.
+    void    manageLandings();
     int    desiredCount() const;
 
     QVector<Fly> m_flies;
     QRectF   m_bin;
+    /// Coverage grid over m_bin; empty means "no silhouette known".
+    QVector<quint8> m_cov;
+    int      m_covW = 0, m_covH = 0;
+    /// Cell indices that are solid, for picking a landing spot that is
+    /// actually on the bin rather than merely inside its bounding box.
+    QVector<int> m_covSolid;
     float    m_time = 0.0f;   // drives the noise field's evolution
     float    m_fullness       = 0.0f; // eased
     float    m_fullnessTarget = 0.0f;
@@ -298,6 +347,7 @@ private:
     bool     m_cursorPresent = false;
     bool     m_cursorOnBin   = false;
     uint32_t m_rngState;
+    quint32  m_nextId = 1;
 };
 
 } // namespace hyperbin

@@ -93,6 +93,103 @@ void FlySim::setBinRect(const QRectF &r)
     m_bin = r;
 }
 
+void FlySim::manageLandings()
+{
+    // Hold a floor of flies ON the bin. Per-fly timers can't express this
+    // on their own: each fly decides independently, so the count drifts
+    // and the bin goes bare for seconds at a stretch purely by chance.
+    // This is the one genuinely population-level rule in the sim.
+    if (m_bin.isEmpty() || m_cursorOnBin)
+        return;
+
+    int landed = 0, inbound = 0;
+    for (const Fly &f : m_flies) {
+        if (f.leaving)
+            continue;
+        if (f.mode == FlyMode::Crawling)
+            ++landed;
+        else if (f.seekingLand)
+            ++inbound;
+    }
+
+    const int target = qMin(params.preferLanded, int(m_flies.size()));
+    if (landed + inbound >= target)
+        return;
+
+    // Send whoever is closest — it arrives soonest, and a fly turning
+    // toward the bin from nearby reads as intent rather than teleportation.
+    Fly *best = nullptr;
+    double bestD = 1e18;
+    for (Fly &f : m_flies) {
+        if (f.leaving || f.seekingLand || f.mode == FlyMode::Crawling
+            || f.bolting || f.scatterLeft > 0.0f)
+            continue;
+        const QPointF d = f.pos - m_bin.center();
+        const double dist = d.x() * d.x() + d.y() * d.y();
+        if (dist < bestD) {
+            bestD = dist;
+            best  = &f;
+        }
+    }
+    if (best) {
+        best->seekingLand = true;
+        best->landTarget  = surfaceTarget();
+    }
+}
+
+void FlySim::setSurface(const QVector<quint8> &coverage, int w, int h)
+{
+    if (w <= 0 || h <= 0 || coverage.size() < w * h) {
+        m_cov.clear();
+        m_covSolid.clear();
+        m_covW = m_covH = 0;
+        return;
+    }
+    m_cov  = coverage;
+    m_covW = w;
+    m_covH = h;
+    m_covSolid.clear();
+    m_covSolid.reserve(w * h / 2);
+    for (int i = 0; i < w * h; ++i)
+        if (m_cov[i])
+            m_covSolid.push_back(i);
+    // No solid cells at all means the grid is useless; fall back rather
+    // than stranding every fly with nowhere to land.
+    if (m_covSolid.isEmpty()) {
+        m_cov.clear();
+        m_covW = m_covH = 0;
+    }
+}
+
+bool FlySim::onSurfaceAt(const QPointF &p) const
+{
+    if (m_bin.isEmpty())
+        return false;
+    if (m_cov.isEmpty())
+        return m_bin.contains(p);   // no silhouette known; box is all we have
+    const double u = (p.x() - m_bin.left()) / m_bin.width();
+    const double v = (p.y() - m_bin.top()) / m_bin.height();
+    if (u < 0.0 || u >= 1.0 || v < 0.0 || v >= 1.0)
+        return false;
+    const int x = qBound(0, int(u * m_covW), m_covW - 1);
+    const int y = qBound(0, int(v * m_covH), m_covH - 1);
+    return m_cov[y * m_covW + x] != 0;
+}
+
+QPointF FlySim::surfaceTarget()
+{
+    if (m_covSolid.isEmpty() || m_bin.isEmpty())
+        return m_bin.center();
+    const int idx = m_covSolid[int(rnd() * m_covSolid.size()) % m_covSolid.size()];
+    const int x = idx % m_covW, y = idx / m_covW;
+    // Aim at the middle of the cell, jittered inside it so successive
+    // landings don't stack on the same handful of points.
+    const double u = (x + 0.2 + 0.6 * rnd()) / m_covW;
+    const double v = (y + 0.2 + 0.6 * rnd()) / m_covH;
+    return QPointF(m_bin.left() + u * m_bin.width(),
+                   m_bin.top()  + v * m_bin.height());
+}
+
 void FlySim::setCursor(const QPointF &p, bool present)
 {
     m_cursor        = p;
@@ -142,6 +239,7 @@ void FlySim::spawnFly()
     const float halfW = m_bin.width()  > 2.0 ? float(m_bin.width())  * 0.5f : 20.0f * k;
     const float halfH = m_bin.height() > 2.0 ? float(m_bin.height()) * 0.5f : 14.0f * k;
     Fly f;
+    f.id = m_nextId++;
     // Appear clear of the icon, for the same reason flies fade out clear
     // of it: materialising on top of the bin doesn't read as arriving.
     //
@@ -193,8 +291,10 @@ void FlySim::spawnFly()
     // flies used to die before ever getting asked, and the swarm went
     // almost entirely airborne.
     f.seekingLand = rnd() < params.landChance;
-    if (f.seekingLand)
+    if (f.seekingLand) {
+        f.landTarget = surfaceTarget();
         f.modeLeft = rndRange(params.flyMin, params.flyMax) * 0.5f;
+    }
     m_flies.push_back(f);
 }
 
@@ -243,6 +343,8 @@ void FlySim::step(float dt)
             f.boltLeft = params.boltFor;
         }
     }
+    manageLandings();
+
     const int want = desiredCount();
 
     // Count only the flies that are staying — a departing one has already
@@ -322,13 +424,19 @@ void FlySim::step(float dt)
         // flying — a timer alone could park one mid-air at crawl speed,
         // which reads as hovering rather than landing.
         f.modeLeft -= dt;
-        const bool overBin = m_bin.contains(f.pos);
+        // The SILHOUETTE, not the bounding box. A fly standing on the
+        // empty part of the Dock tile is clipped away by the renderer, so
+        // treating that as "landed" produced a sim full of flies and a
+        // screen with none.
+        const bool overBin = onSurfaceAt(f.pos);
         if (!f.leaving) {
             if (f.mode == FlyMode::Crawling && !overBin) {
                 enterMode(f, FlyMode::Flying);      // drifted off: take off
             } else if (f.seekingLand && overBin) {
                 enterMode(f, FlyMode::Crawling);     // arrived: settle
                 f.seekingLand = false;
+                f.landTarget  = f.pos;
+                f.walkAngle   = rndRange(0.0f, float(2 * M_PI));
             } else if (f.mode == FlyMode::Crawling && f.modeLeft <= 0.0f
                        && f.crawlStage < 2) {
                 // Done walking: stop again before leaving, rather than
@@ -341,6 +449,8 @@ void FlySim::step(float dt)
                 } else {
                     enterMode(f, FlyMode::Flying);   // another circuit
                     f.seekingLand = rnd() < params.landChance;
+                    if (f.seekingLand)
+                        f.landTarget = surfaceTarget();
                 }
             }
         }
@@ -374,8 +484,22 @@ void FlySim::step(float dt)
             if (f.pauseLeft <= 0.0f) {
                 if (f.crawlStage == 0)
                     f.crawlStage = 1;                 // settled; start walking
-                else if (f.crawlStage == 2)
-                    enterMode(f, FlyMode::Flying);    // paused; now leave
+                else if (f.crawlStage == 2) {
+                    // Refuse to leave if this fly is the last one on the
+                    // bin — it goes back to walking instead. Without this
+                    // the floor above can only react AFTER the bin is
+                    // already bare, which shows.
+                    int others = 0;
+                    for (const Fly &o : m_flies)
+                        if (&o != &f && !o.leaving && o.mode == FlyMode::Crawling)
+                            ++others;
+                    if (others < params.minLanded && !m_cursorOnBin) {
+                        f.crawlStage = 1;
+                        f.modeLeft   = rndRange(params.crawlMin, params.crawlMax);
+                    } else {
+                        enterMode(f, FlyMode::Flying); // paused; now leave
+                    }
+                }
             }
         } else if (crawling && f.crawlStage == 1 && !f.leaving
                    && rnd() < params.restChance) {
@@ -468,11 +592,22 @@ void FlySim::step(float dt)
         // A crawler samples the field at a slightly finer scale, but
         // nothing like the 3x used before — that turned the curl into
         // noise at body scale and made them jitter constantly.
-        const float freq = crawling ? 1.6f : 1.0f;
-        QPointF raw = curlAt(float(f.pos.x()) * freq, float(f.pos.y()) * freq);
-        const float dlen = float(std::hypot(raw.x(), raw.y()));
-        raw = dlen > 0.001f ? raw / dlen
-                            : QPointF(std::cos(f.wanderAngle), std::sin(f.wanderAngle));
+        QPointF raw;
+        if (crawling) {
+            // A WALK, not a drift. Sampling the curl field at the fly's
+            // own position gave a direction that changed as fast as it
+            // moved, so a crawler pivoted on the spot instead of getting
+            // anywhere. The heading now persists and only wanders slowly,
+            // which is what reads as walking.
+            f.walkAngle += (rnd() - 0.5f) * params.walkWander * dt;
+            raw = QPointF(std::cos(f.walkAngle), std::sin(f.walkAngle));
+        } else {
+            QPointF cn = curlAt(float(f.pos.x()), float(f.pos.y()));
+            const float dlen = float(std::hypot(cn.x(), cn.y()));
+            raw = dlen > 0.001f ? cn / dlen
+                                : QPointF(std::cos(f.wanderAngle),
+                                          std::sin(f.wanderAngle));
+        }
         // Low-pass the DIRECTION before it becomes a target velocity. The
         // curl field is sampled at the fly's own position, so it changes
         // as fast as the fly travels — fed in raw it read as twitching
@@ -514,10 +649,25 @@ void FlySim::step(float dt)
             }
         }
         if (f.seekingLand && !f.leaving) {
-            const QPointF toBin = c - f.pos;
+            // Aim at a chosen spot ON the artwork. Steering at the rect's
+            // centre was fine when the whole rect counted as landable;
+            // now that only the ink does, the centre is often a hole.
+            const QPointF toBin = f.landTarget - f.pos;
             const float db = float(std::hypot(toBin.x(), toBin.y()));
             if (db > 0.001f)
                 desired = desired * 0.35f + (toBin / db) * speedMax * 0.9f;
+        }
+        // A crawler that wanders off the ink is steered back onto it
+        // instead of taking off. Walking to the rim and stepping back is
+        // what a fly does; launching every time it clips an edge is not.
+        if (crawling && !f.leaving && m_covW > 0) {
+            const QPointF ahead = f.pos + f.vel * 0.25;
+            if (!onSurfaceAt(ahead)) {
+                const QPointF back = f.landTarget - f.pos;
+                const float bl = float(std::hypot(back.x(), back.y()));
+                if (bl > 0.001f)
+                    desired = (back / bl) * speedMax;
+            }
         }
         {
             // Containment: an ellipse matching the icon's proportions —

@@ -5,6 +5,8 @@
 
 #include <QRectF>
 #include <algorithm>
+#include <map>
+#include <vector>
 #include <cmath>
 #include <cstdio>
 
@@ -24,6 +26,30 @@ FlySim makeSim(qreal side, float fullness, uint32_t seed = 12345)
     s.setBinRect(QRectF(500, 500, side, side * 0.7)); // Dock tiles are wide
     s.setFullness(fullness);
     return s;
+}
+
+} // namespace
+
+
+namespace {
+
+/// Coverage grid shaped like the real trash artwork: it fills only the
+/// middle ~54% x 78% of its tile, which is the whole reason the sim needs
+/// to know about it.
+QVector<quint8> binSilhouette(int n)
+{
+    QVector<quint8> cov(n * n, 0);
+    for (int y = 0; y < n; ++y) {
+        const double v = double(y) / n;
+        if (v < 0.14 || v > 0.94) continue;      // above the lid / below the base
+        const double half = 0.27 - 0.04 * (v - 0.2); // slight taper
+        for (int x = 0; x < n; ++x) {
+            const double u = double(x) / n - 0.5;
+            if (std::abs(u) <= half)
+                cov[y * n + x] = 1;
+        }
+    }
+    return cov;
 }
 
 } // namespace
@@ -294,6 +320,102 @@ int main()
         if (!sawPreflight) return fail("flies never pause before taking off");
         if (stillShare < 0.15)
             return fail("landed flies barely stop moving");
+    }
+
+    // --- landed flies are on the ARTWORK, not just inside its box -----
+    // The sim used to treat the bin's bounding rect as landable while the
+    // renderer clipped crawling flies to the artwork's alpha. The artwork
+    // covers under half its tile, so most "landed" flies were invisible:
+    // a busy sim and an empty screen.
+    {
+        const qreal side = 40.0;
+        const QRectF bin(500, 500, side, side * 0.7);
+        FlySim s = makeSim(side, 1.0f, 24680);
+        s.setSurface(binSilhouette(24), 24, 24);
+
+        int landed = 0, landedOffArt = 0;
+        int bareFrames = 0, frames = 0;
+        for (int i = 0; i < 2400; ++i) {
+            s.step(0.05f);
+            ++frames;
+            int onBin = 0;
+            for (const Fly &f : s.flies()) {
+                if (f.mode != FlyMode::Crawling || f.leaving) continue;
+                ++landed;
+                ++onBin;
+                if (!s.onSurfaceAt(f.pos)) ++landedOffArt;
+            }
+            if (onBin == 0) ++bareFrames;
+        }
+        const double offShare = double(landedOffArt) / std::max(1, landed);
+        const double bareShare = double(bareFrames) / frames;
+        std::printf("landed off the artwork: %.1f%%; bin bare %.1f%% of frames\n",
+                    offShare * 100, bareShare * 100);
+        if (offShare > 0.05)
+            return fail("flies land where the renderer will clip them away");
+        // ...and the bin should essentially always have someone on it.
+        if (bareShare > 0.12)
+            return fail("the bin is left empty too often");
+    }
+
+    // --- walking covers ground ---------------------------------------
+    // A crawler used to take its heading from the noise field sampled at
+    // its own position, which changed as fast as it moved — so it pivoted
+    // on the spot rather than walking anywhere.
+    {
+        const qreal side = 40.0;
+        FlySim s = makeSim(side, 1.0f, 13579);
+        s.setSurface(binSilhouette(24), 24, 24);
+
+        // Follow individual flies by id (the vector index is not stable —
+        // flies are removed from the middle) and score each continuous
+        // walking bout by how much of the distance walked was progress.
+        struct Bout { QPointF start, prev; double path = 0, net = 0; };
+        std::map<quint32, Bout> bouts;
+        std::vector<double> scores;
+        for (int i = 0; i < 1600; ++i) {
+            s.step(0.05f);
+            std::map<quint32, bool> alive;
+            for (const Fly &f : s.flies()) {
+                const bool walking = f.mode == FlyMode::Crawling
+                                     && f.crawlStage == 1 && f.pauseLeft <= 0.0f
+                                     && !f.leaving;
+                alive[f.id] = walking;
+                auto it = bouts.find(f.id);
+                if (!walking) {
+                    if (it != bouts.end()) {
+                        if (it->second.path > 4.0)
+                            scores.push_back(it->second.net / it->second.path);
+                        bouts.erase(it);
+                    }
+                    continue;
+                }
+                if (it == bouts.end()) {
+                    Bout b; b.start = f.pos; b.prev = f.pos;
+                    bouts[f.id] = b;
+                    continue;
+                }
+                Bout &b = it->second;
+                b.path += std::hypot(f.pos.x() - b.prev.x(), f.pos.y() - b.prev.y());
+                b.prev = f.pos;
+                b.net = std::max(b.net,
+                                 std::hypot(f.pos.x() - b.start.x(),
+                                            f.pos.y() - b.start.y()));
+            }
+            for (auto it = bouts.begin(); it != bouts.end();)
+                it = alive.count(it->first) ? std::next(it) : bouts.erase(it);
+        }
+        double sum = 0;
+        for (double v : scores) sum += v;
+        const double straightness = scores.empty() ? 0.0 : sum / scores.size();
+        std::printf("walking: %zu bouts, %.0f%% of distance walked was progress\n",
+                    scores.size(), straightness * 100);
+        if (scores.size() < 5)
+            return fail("flies hardly ever walk");
+        // A fly shuffling in place scores near zero however fast its legs
+        // move; one walking a line scores near 1.
+        if (straightness < 0.35)
+            return fail("crawlers shuffle on the spot instead of walking");
     }
 
     // --- containment: must fit the asymmetric overlay margins ---

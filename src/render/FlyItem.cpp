@@ -130,7 +130,39 @@ void FlyItem::setBinIcon(const QImage &img)
 {
     m_binIcon = img;
     m_binIconDirty = true;
+    rebuildSurface();
     update();
+}
+
+void FlyItem::rebuildSurface()
+{
+    // Hand the sim the same silhouette the shader clips against.
+    //
+    // These two used to disagree: the sim landed flies anywhere inside
+    // the bin's bounding rect, while maskMode 2 clips a crawling fly to
+    // the artwork's alpha. The trash artwork covers well under half of
+    // its own Dock tile, so most landed flies stood on empty tile and
+    // were erased — the sim reported a crowded bin and the screen showed
+    // an empty one. Coarse on purpose: it is a walkable-surface test, not
+    // a rendering mask, and a fly is bigger than one cell anyway.
+    if (m_binIcon.isNull()) {
+        m_sim.setSurface({}, 0, 0);
+        return;
+    }
+    constexpr int kCov = 24;
+    const QImage src = m_binIcon.scaled(kCov, kCov, Qt::IgnoreAspectRatio,
+                                        Qt::SmoothTransformation)
+                           .convertToFormat(QImage::Format_ARGB32);
+    QVector<quint8> cov(kCov * kCov, 0);
+    for (int y = 0; y < kCov; ++y) {
+        const QRgb *row = reinterpret_cast<const QRgb *>(src.constScanLine(y));
+        for (int x = 0; x < kCov; ++x)
+            // Matches the shader's own cutoff for "the bin is here"
+            // (smoothstep 0.25..0.65 in flymask.frag) closely enough that
+            // a fly is never standing somewhere it gets clipped.
+            cov[y * kCov + x] = qAlpha(row[x]) > 115 ? 1 : 0;
+    }
+    m_sim.setSurface(cov, kCov, kCov);
 }
 
 void FlyItem::setFrameIntervalMs(int ms)

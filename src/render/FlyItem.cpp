@@ -79,16 +79,41 @@ QImage FlyItem::buildSprite(int px)
         // it. It also survives the downscale: the sprite is drawn at 32px
         // and shown at roughly a third of that, so a 1.6px stroke lands as
         // a soft edge rather than a hard line.
+        // SHORT AND BROAD, not long and thin. The wing used to be a
+        // tapering cubic sliver sweeping most of a body-length back —
+        // which is the right shape for a fly you can see, and the wrong
+        // one for a fly drawn at 32px and shown at 8. A sliver one texture
+        // pixel wide at its ends averages away to nothing in the
+        // downscale, and what survived was a black dot with no insect
+        // around it. A paddle roughly as long as the body and a third as
+        // wide keeps its area when it shrinks, and at full size still
+        // reads as a wing because the sweep angle — not the outline — is
+        // what says "wing".
+        //
+        // Ellipses rather than paths for the same reason: at this size
+        // the silhouette is all that survives, and an ellipse's is
+        // predictable at any scale.
+        // Stretch a little as it swings out, as well as rotating. Rotation
+        // alone is a few pixels of arc at the size this is actually drawn,
+        // which is not enough to read as a beat — the old sliver got its
+        // flap from changing length, and losing that entirely would have
+        // traded a visible fly for a static one.
+        const qreal wingLen  = bw * 0.78 * (0.88 + 0.18 * spread); // half-length
+        const qreal wingWid  = bh * 0.70;                          // half-width
+        // Folded back at rest, swung out at the top of the beat. Angle is
+        // measured off the body's axis, so the flap reads as rotation
+        // rather than as the wing changing shape.
+        const qreal sweepDeg = 18.0 + 42.0 * spread;
         p.setPen(QPen(QColor(20, 20, 26, 105), px * 0.05));
-        p.setBrush(QColor(255, 255, 255, int(90 + 55 * spread)));
+        p.setBrush(QColor(255, 255, 255, int(105 + 60 * spread)));
         for (int s : {-1, 1}) {
-            QPainterPath wing;
-            const qreal out = 0.6 + 2.2 * spread; // how far it swings out
-            wing.moveTo(c - bw * 0.1, cy + s * bh * 0.4);
-            wing.cubicTo(c - bw * 1.5, cy + s * bh * out,
-                         c - bw * 2.3, cy + s * bh * (out * 0.55),
-                         c - bw * 0.9, cy + s * bh * 0.5);
-            p.drawPath(wing);
+            p.save();
+            p.translate(c - bw * 0.15, cy + s * bh * 0.45);   // shoulder
+            p.rotate(s * (180.0 - sweepDeg));
+            // Hinged at the shoulder: the ellipse is centred a full
+            // half-length out, so the wing root stays at the body.
+            p.drawEllipse(QPointF(wingLen, 0.0), wingLen, wingWid);
+            p.restore();
         }
         p.setPen(Qt::NoPen);   // the body and head are fills, not strokes
 

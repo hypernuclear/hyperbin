@@ -216,7 +216,7 @@ public:
     ///
     /// HYPERBIN_FLY_SIZE multiplies this at runtime for quick A/B, but
     /// editing here is the intended way to settle it.
-    static constexpr qreal kFlyLengthAt40 = 4.0;
+    static constexpr qreal kFlyLengthAt40 = 4.5;
 
     /// How much of the sprite's quad the visible fly actually fills. The
     /// rest is wings, drop shadow and transparent margin. Shared so the

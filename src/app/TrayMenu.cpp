@@ -17,7 +17,12 @@ namespace {
 
 /// Sizes the menu-bar icon is rendered at. macOS asks for @1x and @2x;
 /// giving both means the shell never has to scale a bitmap.
-constexpr int kIconPx[] = {18, 36, 54};
+constexpr int kIconPx[] = {22, 44, 66};
+
+/// Padding around the glyph, as a fraction of the icon box. The artwork
+/// is cropped to its own ink first (see trayIcon), so this is the only
+/// empty space in the image and the mark fills the rest.
+constexpr qreal kInset = 0.02;
 
 } // namespace
 
@@ -69,6 +74,37 @@ QIcon TrayMenu::trayIcon()
         return QIcon();
     }
 
+    // Where the ink actually is inside the viewBox. The artwork does not
+    // fill its own 1200x1200 box, so rendering the box into the icon
+    // produced a small mark floating in empty space — it read as a tray
+    // icon half the size of everything else in the bar. Measured once
+    // from a high-resolution render rather than assumed, so retouching
+    // the SVG can't quietly reintroduce the padding.
+    static const QRectF ink = [&r] {
+        constexpr int probe = 256;
+        QImage img(probe, probe, QImage::Format_ARGB32_Premultiplied);
+        img.fill(Qt::transparent);
+        QPainter pp(&img);
+        r.render(&pp, QRectF(0, 0, probe, probe));
+        pp.end();
+        int x0 = probe, y0 = probe, x1 = -1, y1 = -1;
+        for (int y = 0; y < probe; ++y) {
+            const QRgb *row = reinterpret_cast<const QRgb *>(img.constScanLine(y));
+            for (int x = 0; x < probe; ++x) {
+                if (qAlpha(row[x]) > 8) {
+                    x0 = qMin(x0, x); x1 = qMax(x1, x);
+                    y0 = qMin(y0, y); y1 = qMax(y1, y);
+                }
+            }
+        }
+        if (x1 < x0 || y1 < y0)
+            return QRectF(0, 0, 1, 1);            // nothing drawn; use the box
+        const QRectF vb = r.viewBoxF();
+        const qreal sx = vb.width() / probe, sy = vb.height() / probe;
+        return QRectF(vb.x() + x0 * sx, vb.y() + y0 * sy,
+                      (x1 - x0 + 1) * sx, (y1 - y0 + 1) * sy);
+    }();
+
     const QColor fill = glyphColor();
     QIcon icon;
     for (int px : kIconPx) {
@@ -76,10 +112,19 @@ QIcon TrayMenu::trayIcon()
         pm.fill(Qt::transparent);
         QPainter p(&pm);
         p.setRenderHint(QPainter::Antialiasing, true);
-        // A hair of padding: the artwork runs to the edge of its viewBox
-        // and menu-bar items look cramped without it.
-        const qreal inset = px * 0.06;
-        r.render(&p, QRectF(inset, inset, px - 2 * inset, px - 2 * inset));
+        // Scale the INK to fill the icon, preserving its aspect ratio,
+        // instead of scaling the viewBox and inheriting its dead space.
+        const qreal avail = px * (1.0 - 2 * kInset);
+        const qreal s = qMin(avail / ink.width(), avail / ink.height());
+        const QRectF box((px - ink.width() * s) / 2.0,
+                         (px - ink.height() * s) / 2.0,
+                         ink.width() * s, ink.height() * s);
+        p.save();
+        p.translate(box.topLeft());
+        p.scale(s, s);
+        p.translate(-ink.topLeft());
+        r.render(&p, r.viewBoxF());
+        p.restore();
         // Recolour through the rendered alpha. The SVG has no fill colour
         // of its own worth keeping — it is a silhouette — so painting the
         // wanted colour over it in SourceIn turns the asset into a shape

@@ -92,11 +92,13 @@ int main()
             double(crawlSamples) / std::max(1, crawlSamples + flySamples);
         std::printf("mode mix: %.0f%% crawling, %.0f%% flying\n",
                     crawlShare * 100, (1 - crawlShare) * 100);
-        // Flying is meant to dominate — crawling is an occasional visit
-        // to the bin, not the default state. Still has to happen though.
-        if (crawlShare < 0.05 || crawlShare > 0.45)
-            return fail("movement mix is wrong; flying should dominate "
-                        "but crawling must still occur");
+        // Landing is meant to dominate now: the intended read is flies
+        // that live ON the bin and take off occasionally, not flies that
+        // circle it and touch down rarely. Flight still has to happen —
+        // every visit begins and ends with one.
+        if (crawlShare < 0.55 || crawlShare > 0.90)
+            return fail("movement mix is wrong; landing should dominate "
+                        "but flying must still occur");
     }
 
     // --- flies fade in and out clear of the bin ----------------------
@@ -265,6 +267,35 @@ int main()
         // it — that is the difference between flying off and blinking out.
         if (lifeAfterBolt < 1.0) return fail("bolting flies are killed off immediately");
     }
+    // --- landing sequence --------------------------------------------
+    // The intended read is: fly in, touch down, sit still, walk a bit,
+    // stop again, leave. The stillness either side of the walk is the
+    // part that makes it look deliberate, so check it actually happens.
+    {
+        FlySim s = makeSim(40, 1.0f, 1234);
+        int still = 0, crawlSamples = 0;
+        bool sawSettle = false, sawWalk = false, sawPreflight = false;
+        for (int i = 0; i < 2400; ++i) {
+            s.step(0.05f);
+            for (const Fly &f : s.flies()) {
+                if (f.mode != FlyMode::Crawling) continue;
+                ++crawlSamples;
+                if (std::hypot(f.vel.x(), f.vel.y()) < 0.01) ++still;
+                if (f.crawlStage == 0 && f.pauseLeft > 0) sawSettle = true;
+                if (f.crawlStage == 1) sawWalk = true;
+                if (f.crawlStage == 2 && f.pauseLeft > 0) sawPreflight = true;
+            }
+        }
+        const double stillShare = double(still) / std::max(1, crawlSamples);
+        std::printf("landed flies: %.0f%% of crawl time held still\n",
+                    stillShare * 100);
+        if (!sawSettle)    return fail("flies never settle after landing");
+        if (!sawWalk)      return fail("flies land but never walk");
+        if (!sawPreflight) return fail("flies never pause before taking off");
+        if (stillShare < 0.15)
+            return fail("landed flies barely stop moving");
+    }
+
     // --- containment: must fit the asymmetric overlay margins ---
     for (qreal side : {28.0, 40.0, 95.0}) {
         FlySim s = makeSim(side, 1.0f, 4242);

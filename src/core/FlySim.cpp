@@ -122,6 +122,14 @@ void FlySim::enterMode(Fly &f, FlyMode m)
     f.mode = m;
     f.modeLeft = (m == FlyMode::Crawling) ? rndRange(params.crawlMin, params.crawlMax)
                                           : rndRange(params.flyMin, params.flyMax);
+    if (m == FlyMode::Crawling) {
+        // Land, then hold still for a beat before walking anywhere.
+        f.crawlStage = 0;
+        f.pauseLeft  = rndRange(params.settleMin, params.settleMax);
+    } else {
+        f.crawlStage = 0;
+        f.pauseLeft  = 0.0f;
+    }
 }
 
 void FlySim::spawnFly()
@@ -321,6 +329,12 @@ void FlySim::step(float dt)
             } else if (f.seekingLand && overBin) {
                 enterMode(f, FlyMode::Crawling);     // arrived: settle
                 f.seekingLand = false;
+            } else if (f.mode == FlyMode::Crawling && f.modeLeft <= 0.0f
+                       && f.crawlStage < 2) {
+                // Done walking: stop again before leaving, rather than
+                // launching mid-stride.
+                f.crawlStage = 2;
+                f.pauseLeft  = rndRange(params.preFlightMin, params.preFlightMax);
             } else if (f.modeLeft <= 0.0f) {
                 if (f.mode == FlyMode::Crawling) {
                     enterMode(f, FlyMode::Flying);   // done crawling
@@ -343,9 +357,32 @@ void FlySim::step(float dt)
             const bool toward = QPointF::dotProduct(f.vel, toC) > 0.0;
             if (toward != f.wasToward) {
                 f.wasToward = toward;
-                f.inFront   = toward ? (rnd() < params.frontShare) : true;
+                // A fly coming in to LAND is always in front. The whole
+                // sequence — touch down, sit still, walk, go — is invisible
+                // behind the bin, and it was landing behind it most of the
+                // time that made the swarm look like it never landed.
+                f.inFront   = !toward || f.seekingLand
+                              || rnd() < params.frontShare;
             }
         }
+        // --- landing sequence ------------------------------------------
+        // land -> settle -> walk -> pause -> take off. Each step is a
+        // timer rather than a distance, so it looks the same whatever the
+        // Dock size is.
+        if (crawling && f.pauseLeft > 0.0f) {
+            f.pauseLeft -= dt;
+            if (f.pauseLeft <= 0.0f) {
+                if (f.crawlStage == 0)
+                    f.crawlStage = 1;                 // settled; start walking
+                else if (f.crawlStage == 2)
+                    enterMode(f, FlyMode::Flying);    // paused; now leave
+            }
+        } else if (crawling && f.crawlStage == 1 && !f.leaving
+                   && rnd() < params.restChance) {
+            f.pauseLeft = rndRange(params.restMin, params.restMax);
+        }
+        const bool paused = crawling && f.pauseLeft > 0.0f;
+
         // --- startle ---------------------------------------------------
         // A crawler occasionally freezes, holds for a beat, then bolts.
         if (crawling && !f.leaving && f.freezeLeft <= 0.0f && !f.bolting
@@ -398,7 +435,7 @@ void FlySim::step(float dt)
         const float cruise = speedMax;
         if (crawling)
             speedMax *= f.pace;
-        if (frozen)
+        if (frozen || paused)
             speedMax = 0.0f;
         // A bolting fly keeps its speed up. Without this the very next
         // frame clamps it back to the normal cruise limit and the burst
@@ -572,7 +609,7 @@ void FlySim::step(float dt)
         // Twitches: a crawler makes quick sideways corrections, a flier
         // occasionally darts.
         if (crawling) {
-            if (!frozen && rnd() < params.jitterChance) {
+            if (!frozen && !paused && rnd() < params.jitterChance) {
                 const float side = rnd() < 0.5f ? -1.0f : 1.0f;
                 f.vel += QPointF(side, rndRange(-0.25f, 0.25f))
                          * params.jitterImpulse * k;
@@ -581,7 +618,7 @@ void FlySim::step(float dt)
             f.vel += QPointF(rndRange(-1, 1), rndRange(-1, 1))
                      * params.dartImpulse * k;
         }
-        if (frozen)
+        if (frozen || paused)
             f.vel = QPointF(0, 0);
         f.vel = limit(f.vel, speedMax * 1.6f);
         // Fliers always cruise. Steering terms can cancel — an outward
@@ -632,7 +669,9 @@ void FlySim::step(float dt)
         // Crawling flies beat their wings far less.
         // Wings stop dead during the freeze. A fly holding still with its
         // wings still going would look like a rendering glitch.
-        f.phase += frozen ? 0.0f : dt * (crawling ? 9.0f : 40.0f);
+        // Wings stop dead while still — during a startle freeze, and while
+        // settling or waiting to take off.
+        f.phase += (frozen || paused) ? 0.0f : dt * (crawling ? 9.0f : 40.0f);
     }
 
     // Retire faded-out flies. Culling on fade alone (rather than on

@@ -11,6 +11,9 @@ svg = open('resources/hyperbin.svg').read()
 d = re.search(r'<path d="([^"]+)"', svg).group(1)
 vb = re.search(r'viewBox="0 0 (\d+) (\d+)"', svg)
 w, h = vb.group(1), vb.group(2)
+rule = re.search(r'fill-rule="(\w+)"', svg)
+fill_rule = ('ShapePath.OddEvenFill' if rule and rule.group(1) == 'evenodd'
+             else 'ShapePath.WindingFill')
 
 # Wrap into C++ string literal chunks so the source stays readable.
 chunks = textwrap.wrap(d, 88, break_long_words=True, break_on_hyphens=False)
@@ -104,7 +107,7 @@ Item {{
         ShapePath {{
             strokeColor: "transparent"
             fillColor: root.color
-            fillRule: ShapePath.WindingFill
+            fillRule: {fill_rule}
             PathSvg {{ path: BinGlyphData.path }}
         }}
     }}

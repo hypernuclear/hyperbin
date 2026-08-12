@@ -33,7 +33,7 @@ Item {
         ShapePath {
             strokeColor: "transparent"
             fillColor: root.color
-            fillRule: ShapePath.WindingFill
+            fillRule: ShapePath.OddEvenFill
             PathSvg { path: BinGlyphData.path }
         }
     }

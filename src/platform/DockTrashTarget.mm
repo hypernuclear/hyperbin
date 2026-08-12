@@ -315,6 +315,25 @@ int DockTrashTarget::countViaFinder()
     return int(r.int32Value);
 }
 
+void DockTrashTarget::setAnimating(bool animating)
+{
+    if (animating == m_animating)
+        return;
+    m_animating = animating;
+    if (!m_poll.isActive())
+        return;
+    if (animating) {
+        // Resume at frame rate AND take a reading immediately: the Dock
+        // may have moved or magnified while we were idle, and waiting up
+        // to a second for the next slow tick would show as the swarm
+        // starting up in the wrong place.
+        m_poll.setInterval(kFastPollMs);
+        pollIconRect();
+    } else {
+        m_poll.setInterval(kSlowPollMs);
+    }
+}
+
 void DockTrashTarget::pollTrash()
 {
     // Only ~/.Trash. Items trashed from other volumes live in
@@ -421,7 +440,12 @@ void DockTrashTarget::pollIconRect()
     }
 
     // Drop to a lazy poll when there's nothing to follow.
-    const int want = onScreen ? kFastPollMs : kSlowPollMs;
+    // Frame-rate tracking only while something is actually being drawn.
+    // Off screen, or with nothing to draw, once a second is plenty.
+    const int want = (onScreen && m_animating) ? kFastPollMs : kSlowPollMs;
+    if (qEnvironmentVariableIsSet("HYPERBIN_DEBUG") && want != m_poll.interval())
+        qInfo("hyperbin: icon poll -> %dms (onScreen=%d animating=%d)",
+              want, onScreen, m_animating);
     if (m_poll.interval() != want)
         m_poll.setInterval(want);
 

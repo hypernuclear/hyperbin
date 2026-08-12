@@ -26,6 +26,7 @@ public:
     qint64 byteSize() const override { return m_bytes; }
     void   start() override;
     void   stop() override;
+    void   setAnimating(bool animating) override;
     void   openRemediation() override;
     QImage iconImage(int px) const override;
 
@@ -64,6 +65,7 @@ private:
     int       m_trashTick = 0;   // divides the icon poll down for the count
     QDateTime m_trashMTime;
     bool      m_directRead = false; // true when ~/.Trash is readable outright
+    bool      m_animating  = true;  // drives the fast/slow poll choice
 };
 
 } // namespace hyperbin

@@ -50,6 +50,16 @@ public:
     virtual void start() = 0;
     virtual void stop()  = 0;
 
+    /// Whether anything is being DRAWN right now.
+    ///
+    /// The icon is tracked at frame rate so the overlay doesn't lag the
+    /// Dock during magnification — but that is only worth paying for
+    /// while there are flies to keep aligned. With the swarm shooed away
+    /// or the bin empty, nothing is drawn and the fast poll is pure
+    /// waste, which is exactly the residual cost measured in the
+    /// scattered state. Implementations drop to a slow poll when false.
+    virtual void setAnimating(bool animating) { Q_UNUSED(animating); }
+
     /// Platform-specific remediation for a non-Ok status: opens the
     /// Accessibility pane, or Windows' desktop-icon settings.
     virtual void openRemediation() {}

@@ -217,84 +217,72 @@ public:
         int   minFlies       = 1;      // while the bin has anything in it
         int   maxFlies       = 6;
 
-        float lifeMin        = 3.0f;   // then it leaves and is replaced
-        float lifeMax        = 11.0f;
+        // No lifespan any more: flies leave only when the pointer
+        // arrives, the bin empties, or the swarm has to shrink. The old
+        // 3-11s expiry read as restlessness rather than as life.
         float fadeTime       = 0.40f;  // arrival/departure ramp
 
         float crawlSpeed     = 9.0f;   // px/sec — a slow potter
-        float flySpeed       = 350.0f;
+        float flySpeed       = 350.0f; // px/sec, cruise
+
         // Speed envelope across a flight: push off gently, cruise, then
         // ease down onto the bin. Constant speed was the single most
         // mechanical-looking thing left in the swarm.
+        float takeoffRamp    = 0.55f;  // seconds spent getting up to speed
+        float takeoffSpeed   = 0.38f;  // fraction of cruise at takeoff
+        float approachSlow   = 0.40f;  // fraction of cruise on touchdown
+        float approachRange  = 1.10f;  // approach begins, in icon widths
+
         // Every so often a fly takes a proper lap instead of hopping
         // straight back down. Without this every flight is the same
         // length, which is its own kind of mechanical.
         float longFlightChance = 0.30f;
         float longFlyMin     = 2.6f;
-        float longFlyMax      = 8.0f;
+        float longFlyMax     = 8.0f;
 
-        float takeoffRamp    = 0.55f;  // seconds spent getting up to speed
-        float takeoffSpeed   = 0.38f;  // fraction of cruise at the instant of takeoff
-        float approachSlow   = 0.40f;  // fraction of cruise on touchdown
-        float approachRange  = 1.10f;  // where the approach begins, in icon widths  // px/sec — actual flying
-
-        // Flying is the default state; crawling is a brief visit. The
-        // previous split had them settling almost as often as flying,
-        // which read as a swarm that had given up.
+        // Mode durations. Landing dominates: the intended read is flies
+        // that live ON the bin and take off now and then, not flies that
+        // circle it and touch down rarely.
         float crawlMin       = 5.0f;   // seconds spent in each mode
         float crawlMax       = 13.0f;
         float flyMin         = 0.5f;
         float flyMax         = 2.6f;
 
-        /// Chance of actually settling when a flier passes over the bin
-        /// with its timer up. Below 1 so most passes stay airborne.
+        /// Chance of settling when a flier's timer is up. A fly on a long
+        /// circuit is exempt — it is out for a lap, not a hop.
         float landChance     = 0.95f;
         /// Flies that must be ON the bin at any moment, traffic
         /// permitting. Independent per-fly timers alone can't hold a
-        /// population invariant: they drift, and the bin goes empty for
-        /// seconds at a time purely by chance.
+        /// population invariant: they drift, and the bin goes bare for
+        /// seconds at a time purely by chance. preferLanded is above the
+        /// minimum because landing is restricted to flies in front, so one
+        /// that arrives behind has to come round before it can land.
         int   minLanded      = 1;
-        // Raised from 2 when landing was restricted to flies in front: a fly
-        // that arrives behind now has to come round before it can land, so
-        // more of them have to be heading in to keep the bin occupied.
         int   preferLanded   = 3;
-        // Stillness either side of the walk. A fly that lands and
-        // immediately starts trundling reads as a machine on rails; the
-        // pause is what makes the landing look like a decision.
-        float settleMin      = 0.30f;
+
+        // Stillness either side of the walk, and during it. A fly that
+        // lands and immediately starts trundling reads as a machine on
+        // rails; the pauses are what make the landing look like a
+        // decision.
+        float settleMin      = 0.30f;  // held still on touchdown
         float settleMax      = 0.85f;
-        float preFlightMin   = 0.25f;
+        float preFlightMin   = 0.25f;  // held still before taking off
         float preFlightMax   = 0.75f;
-        // Stops DURING the walk, not just at either end. Dwell time on
-        // the bin is now several seconds, and pausing only on arrival and
-        // departure left a long uninterrupted trundle in the middle —
-        // which is the machine-on-rails look the pauses exist to avoid.
         float restChance     = 0.012f; // per walking fly per step
+        float restMin        = 0.20f;
+        float restMax        = 0.80f;
         /// How fast a walking fly's heading drifts, in rad/s. Low: the
         /// point is that it holds a line long enough to cover ground.
         float walkWander     = 3.0f;
-        float restMin        = 0.20f;
-        float restMax        = 0.80f;
 
-        // Crawling twitches: infrequent and small. At the previous rate
-        // (0.12 / 26px) a crawling fly was in near-constant spasm rather
-        // than picking its way over the surface.
         float jitterChance   = 0.02f;  // per crawling fly per step
-        float jitterImpulse  = 8.0f;   // quick sideways twitch
-        /// How fast the drawn heading may rotate, rad/sec. Snapping it
-        /// straight to the velocity vector made near-stationary flies
-        /// spin on the spot, which is what "stuck and spinning" was.
-        float turnRateCrawl  = 2.2f;
+        float jitterImpulse  = 8.0f;   // px/sec sideways twitch
+        float turnRateCrawl  = 2.2f;   // rad/sec the sprite may rotate
         float turnRateFly    = 6.0f;
-        /// Flying flies range wider than crawling ones — they arc out
-        /// around the bin rather than hugging it.
+        /// Fliers range wider than crawlers, as a multiple of the roam
+        /// region below.
         float flyRoamScale   = 1.25f;
 
-        // Curl-noise flow field. A divergence-free field means the flies
-        // follow coherent swirls instead of each jittering independently,
-        // which is what a plain random walk produced. Modelled on
-        // Kelley/Ouellette-style swarm work (curl noise + interaction
-        // forces + friction) rather than hand-tuned wander.
         float noiseScale     = 0.055f; // spatial frequency, 1/px
         float noiseGain      = 210.0f; // px/sec^2 at fullness 1
         float noiseDrift     = 0.35f;  // how fast the field itself evolves

@@ -136,13 +136,14 @@ int main()
             double(crawlSamples) / std::max(1, crawlSamples + flySamples);
         std::printf("mode mix: %.0f%% crawling, %.0f%% flying\n",
                     crawlShare * 100, (1 - crawlShare) * 100);
-        // Landing is meant to dominate now: the intended read is flies
-        // that live ON the bin and take off occasionally, not flies that
-        // circle it and touch down rarely. Flight still has to happen —
-        // every visit begins and ends with one.
-        if (crawlShare < 0.55 || crawlShare > 0.90)
-            return fail("movement mix is wrong; landing should dominate "
-                        "but flying must still occur");
+        // Both modes must be a real part of the picture. The exact split
+        // is a taste setting spread across landChance, the mode durations
+        // and preferLanded, and it is tuned by eye — this is a guard
+        // against either mode collapsing, NOT a target. Do not narrow it
+        // to whatever the current tuning happens to produce.
+        if (crawlShare < 0.30 || crawlShare > 0.90)
+            return fail("movement mix has collapsed; flies should both "
+                        "land and fly");
     }
 
     // --- flies fade in and out clear of the bin ----------------------

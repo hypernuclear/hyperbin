@@ -78,8 +78,18 @@ int main(int argc, char **argv)
     });
 
     // Wire the three inputs that decide whether we draw at all.
-    QObject::connect(&power, &PowerPolicy::changed, fly, [&] {
+    // Applied on every change AND once at startup. PowerPolicy only
+    // signals when the outcome actually moves, so nothing here ran until
+    // the first transition — the app began life tracking the Dock at
+    // frame rate no matter what state it was really in.
+    auto applyPower = [&] {
         fly->setFrameIntervalMs(power.frameIntervalMs());
+        // Stop tracking the Dock at frame rate when nothing is drawn.
+        // This is the difference between "not rendering" and "not costing
+        // anything": the AX poll ran at 60Hz whatever the swarm was doing,
+        // which is the whole of the residual cost in the shooed-away
+        // state.
+        target->setAnimating(power.shouldRender());
         if (win)
             win->setVisible(power.shouldRender());
 #if defined(Q_OS_MACOS)
@@ -88,7 +98,8 @@ int main(int argc, char **argv)
         // App Nap throttles. Held only while animating.
         setAnimationActivity(power.shouldRender());
 #endif
-    });
+    };
+    QObject::connect(&power, &PowerPolicy::changed, fly, applyPower);
     QObject::connect(fly, &FlyItem::swarmWentIdle, &power,
                      [&] { power.setSwarmIdle(true); });
 
@@ -209,8 +220,16 @@ int main(int argc, char **argv)
     QObject::connect(&settings, &Settings::enabledChanged, &app,
                      [&](bool on) { applyEnabled(on); });
 
+    // HYPERBIN_FORCE_SCATTER=1 pins the app in the shooed-away state so
+    // its residual cost can be measured without having to park a pointer
+    // on the Dock for the length of a powermetrics run.
+    if (qEnvironmentVariableIntValue("HYPERBIN_FORCE_SCATTER") == 1) {
+        qInfo("hyperbin: forced into the scattered state for measurement");
+        power.setScattered(true);
+    }
     power.setSwarmIdle(true);
     applyEnabled(settings.enabled());
+    applyPower();
 
     return app.exec();
 }

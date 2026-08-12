@@ -9,12 +9,9 @@ namespace hyperbin {
 
 qreal FlySim::spriteBase()
 {
-    // Visible length -> quad half-size. The sprite's dark body+head spans
-    // ~58% of the texture cell (body ellipse 0.52 of it, head reaching a
-    // little further forward), so a quad of width W shows a fly of about
-    // 0.58 W. Halved again because this returns a HALF-size.
-    constexpr qreal kInkFraction = 0.58;
-
+    // Visible length -> quad half-size. A quad of width W shows a fly of
+    // about kInkFraction x W; halved again because this returns a
+    // HALF-size.
     static const qreal base = [] {
         qreal gain = 1.0;
         if (qEnvironmentVariableIsSet("HYPERBIN_FLY_SIZE")) {
@@ -220,9 +217,19 @@ void FlySim::setSurface(const QVector<quint8> &coverage, int w, int h)
     m_covH = h;
     m_covSolid.clear();
     m_covSolid.reserve(w * h / 2);
-    for (int i = 0; i < w * h; ++i)
-        if (m_cov[i])
-            m_covSolid.push_back(i);
+    m_covInner.clear();
+    for (int i = 0; i < w * h; ++i) {
+        if (!m_cov[i])
+            continue;
+        m_covSolid.push_back(i);
+        // One-cell erosion. A cell on the rim is a legal place to stand
+        // but a bad place to land, because the fly is wider than the cell
+        // and arrives with its nose already over the edge.
+        const int x = i % w, y = i / w;
+        if (x > 0 && x < w - 1 && y > 0 && y < h - 1
+            && m_cov[i - 1] && m_cov[i + 1] && m_cov[i - w] && m_cov[i + w])
+            m_covInner.push_back(i);
+    }
     // No solid cells at all means the grid is useless; fall back rather
     // than stranding every fly with nowhere to land.
     if (m_covSolid.isEmpty()) {
@@ -250,14 +257,34 @@ QPointF FlySim::surfaceTarget()
 {
     if (m_covSolid.isEmpty() || m_bin.isEmpty())
         return m_bin.center();
-    const int idx = m_covSolid[int(rnd() * m_covSolid.size()) % m_covSolid.size()];
-    const int x = idx % m_covW, y = idx / m_covW;
-    // Aim at the middle of the cell, jittered inside it so successive
-    // landings don't stack on the same handful of points.
-    const double u = (x + 0.2 + 0.6 * rnd()) / m_covW;
-    const double v = (y + 0.2 + 0.6 * rnd()) / m_covH;
-    return QPointF(m_bin.left() + u * m_bin.width(),
-                   m_bin.top()  + v * m_bin.height());
+    // Aim at the eroded silhouette when there is one. A thin or spindly
+    // icon can erode to nothing, so fall back to any solid cell rather
+    // than leaving flies with nowhere to go.
+    const QVector<int> &pool = m_covInner.isEmpty() ? m_covSolid : m_covInner;
+
+    // One grid cell of erosion is not a fly's width — the grid is 24x24
+    // whatever the icon's size, so a cell is ~2px on a 48px bin while the
+    // fly is twice that. Sample a few candidates and prefer one with room
+    // for the whole sprite; a fly that touches down on the rim is clipped
+    // from the instant it lands, before the crawl steering can help.
+    const float clear = float(spriteHalf(qMax(m_bin.width(), m_bin.height()), 1.0f));
+    QPointF best;
+    for (int attempt = 0; attempt < 6; ++attempt) {
+        const int idx = pool[int(rnd() * pool.size()) % pool.size()];
+        const int x = idx % m_covW, y = idx / m_covW;
+        // Aim at the middle of the cell, jittered inside it so successive
+        // landings don't stack on the same handful of points.
+        const double u = (x + 0.2 + 0.6 * rnd()) / m_covW;
+        const double v = (y + 0.2 + 0.6 * rnd()) / m_covH;
+        const QPointF p(m_bin.left() + u * m_bin.width(),
+                        m_bin.top()  + v * m_bin.height());
+        if (attempt == 0)
+            best = p;   // always have an answer, even if none has clearance
+        if (onSurfaceAt(p + QPointF(clear, 0)) && onSurfaceAt(p - QPointF(clear, 0))
+            && onSurfaceAt(p + QPointF(0, clear)) && onSurfaceAt(p - QPointF(0, clear)))
+            return p;
+    }
+    return best;
 }
 
 void FlySim::setCursor(const QPointF &p, bool present)
@@ -796,8 +823,26 @@ void FlySim::step(float dt)
         // A crawler that wanders off the ink is steered back onto it
         // instead of taking off. Walking to the rim and stepping back is
         // what a fly does; launching every time it clips an edge is not.
+        //
+        // The probe is the fly's NOSE, not its centre. It used to be a
+        // quarter-second of travel — about 2px at crawl pace — while the
+        // fly itself is several px long, so its front half was already
+        // over the rim and being sliced by the mask before anything
+        // steered it back. What that looks like on screen is a fly
+        // walking toward the edge and losing its head.
         if (crawling && !f.leaving && m_covW > 0) {
-            const QPointF ahead = f.pos + f.vel * 0.25;
+            const float icon  = float(qMax(m_bin.width(), m_bin.height()));
+            const float reach = float(spriteHalf(icon, f.scale));
+            QPointF heading(std::cos(f.walkAngle), std::sin(f.walkAngle));
+            const float vl = float(std::hypot(f.vel.x(), f.vel.y()));
+            if (vl > 0.001f)
+                heading = f.vel / vl;
+            // Whichever is further out: the fly's own edge, or where it
+            // will be shortly. At crawl pace those are within a pixel or
+            // two of each other, so both matter — the travel term alone
+            // was what let a stationary-ish fly drift its wing over the
+            // rim, and the size term alone would not see a bolting one.
+            const QPointF ahead = f.pos + heading * qMax(reach, vl * 0.25f);
             if (!onSurfaceAt(ahead)) {
                 const QPointF back = f.landTarget - f.pos;
                 const float bl = float(std::hypot(back.x(), back.y()));

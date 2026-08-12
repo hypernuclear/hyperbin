@@ -68,6 +68,18 @@ QImage FlyItem::buildSprite(int px)
 
         // Wings, swept back from the shoulders. White and translucent —
         // on a dark backdrop they're the only part that reads at all.
+        //
+        // Plus a dark rim, because that stopped being true on Windows: the
+        // Recycle Bin is pale, and white-on-pale wings vanished completely,
+        // leaving a black dot with no insect around it. The rim is carried
+        // by the wings alone — the body is already near-black and needs no
+        // help — and it is a rim, not an outline around the whole fly,
+        // which would read as a sticker. Real wings have dark veins and a
+        // darker leading edge, so this adds detail rather than cartooning
+        // it. It also survives the downscale: the sprite is drawn at 32px
+        // and shown at roughly a third of that, so a 1.6px stroke lands as
+        // a soft edge rather than a hard line.
+        p.setPen(QPen(QColor(20, 20, 26, 105), px * 0.05));
         p.setBrush(QColor(255, 255, 255, int(90 + 55 * spread)));
         for (int s : {-1, 1}) {
             QPainterPath wing;
@@ -78,6 +90,7 @@ QImage FlyItem::buildSprite(int px)
                          c - bw * 0.9, cy + s * bh * 0.5);
             p.drawPath(wing);
         }
+        p.setPen(Qt::NoPen);   // the body and head are fills, not strokes
 
         // Black body. A deliberate reversal: a mid grey was used before
         // because black vanishes on a dark wallpaper. The wings and the
@@ -92,6 +105,12 @@ QImage FlyItem::buildSprite(int px)
     }
 
     p.end();
+
+    // HYPERBIN_DUMP_SPRITE=<path.png> writes the atlas out. The fly is a
+    // dozen pixels across in situ, so "is the wing rim actually there or
+    // did the pen get swallowed" is not a question the screen can answer.
+    if (qEnvironmentVariableIsSet("HYPERBIN_DUMP_SPRITE"))
+        img.save(qEnvironmentVariable("HYPERBIN_DUMP_SPRITE"));
     return img;
 }
 

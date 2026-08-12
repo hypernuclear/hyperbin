@@ -218,9 +218,25 @@ public:
     /// editing here is the intended way to settle it.
     static constexpr qreal kFlyLengthAt40 = 4.0;
 
+    /// How much of the sprite's quad the visible fly actually fills. The
+    /// rest is wings, drop shadow and transparent margin. Shared so the
+    /// size dial and the crawl steering agree on where a fly's nose is.
+    static constexpr qreal kInkFraction = 0.58;
+
     /// Half-size of the drawn QUAD at the reference tile, before the
     /// per-fly 0.8–1.2 variation. Derived from kFlyLengthAt40 — tune that.
     static qreal spriteBase();
+
+    /// Half-size of one fly's drawn QUAD — the radius the mask can slice.
+    ///
+    /// Wings, not body: the dark body reaches only kInkFraction of the way
+    /// out, but the wings sweep nearly to the quad's corners and are what
+    /// visibly gets cut. Clearance has to be judged on the widest part, or
+    /// a fly keeps its head at the rim and loses a wing instead.
+    static qreal spriteHalf(qreal iconSize, float flyScale)
+    {
+        return spriteBase() * renderScale(iconSize) * qreal(flyScale);
+    }
 
     /// Half-size of the drawn fly at this icon size — the bound the
     /// margins have to leave room for.
@@ -231,7 +247,7 @@ public:
     /// the first time only one of them is retuned.
     static qreal spriteAllowance(qreal iconSize)
     {
-        return spriteBase() * 1.2 * renderScale(iconSize) + 2.0;
+        return spriteHalf(iconSize, 1.2f) + 2.0;   // 1.2 = the largest fly
     }
 
     /// Icon size relative to the 40pt Dock tile the tunables were set
@@ -412,6 +428,11 @@ private:
     /// Cell indices that are solid, for picking a landing spot that is
     /// actually on the bin rather than merely inside its bounding box.
     QVector<int> m_covSolid;
+    /// Solid cells whose neighbours are solid too — the silhouette eroded
+    /// by one cell. Landing here rather than anywhere solid keeps a fly's
+    /// whole body on the artwork; touching down on a rim cell put its nose
+    /// over the edge, where the mask cut it off the moment it arrived.
+    QVector<int> m_covInner;
     float    m_time = 0.0f;   // drives the noise field's evolution
     float    m_fullness       = 0.0f; // eased
     float    m_fullnessTarget = 0.0f;

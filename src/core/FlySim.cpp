@@ -154,6 +154,11 @@ void FlySim::manageLandings()
         if (f.leaving || f.seekingLand || f.mode == FlyMode::Crawling
             || f.bolting || f.scatterLeft > 0.0f)
             continue;
+        // Not one that is behind the bin AND over it: it would have to
+        // change depth where the change is visible. Off the bin, the swap
+        // below is free.
+        if (!f.inFront && onSurfaceAt(f.pos))
+            continue;
         const QPointF d = f.pos - m_bin.center();
         const double dist = d.x() * d.x() + d.y() * d.y();
         if (dist < bestD) {
@@ -164,6 +169,10 @@ void FlySim::manageLandings()
     if (best) {
         best->seekingLand = true;
         best->landTarget  = surfaceTarget();
+        // Come round to the front on the way in. Safe here precisely
+        // because the fly is clear of the bin, so nothing pops.
+        best->inFront   = true;
+        best->wasToward = true;
     }
 }
 
@@ -475,7 +484,13 @@ void FlySim::step(float dt)
         if (!f.leaving) {
             if (f.mode == FlyMode::Crawling && !overBin) {
                 enterMode(f, FlyMode::Flying);      // drifted off: take off
-            } else if (f.seekingLand && overBin) {
+            } else if (f.seekingLand && overBin && f.inFront) {
+                // Only a fly that is IN FRONT may land. A fly behind the
+                // bin is masked out entirely, so landing there flipped it
+                // from the hidden batch to the clipped-to-surface batch
+                // and it appeared out of nowhere on the front of the bin.
+                // Depth is only re-decided off the bin, so a fly that
+                // arrives behind has to leave and come back round.
                 enterMode(f, FlyMode::Crawling);     // arrived: settle
                 f.seekingLand = false;
                 f.landTarget  = f.pos;
@@ -493,8 +508,16 @@ void FlySim::step(float dt)
                     enterMode(f, FlyMode::Flying);   // another circuit
                     f.seekingLand = !f.longFlight
                                     && rnd() < params.landChance;
-                    if (f.seekingLand)
+                    if (f.seekingLand) {
                         f.landTarget = surfaceTarget();
+                        // Committing to land means committing to the
+                        // front. Doing it here, off the bin, is what
+                        // keeps the depth change invisible.
+                        if (!onSurfaceAt(f.pos)) {
+                            f.inFront   = true;
+                            f.wasToward = true;
+                        }
+                    }
                 }
             }
         }
@@ -515,8 +538,15 @@ void FlySim::step(float dt)
                 // sequence — touch down, sit still, walk, go — is invisible
                 // behind the bin, and it was landing behind it most of the
                 // time that made the swarm look like it never landed.
-                f.inFront   = !toward || f.seekingLand
-                              || rnd() < params.frontShare;
+                // A fly coming in to LAND is always in front: the whole
+                // sequence — touch down, sit still, walk, go — is
+                // invisible behind the bin. Everything else can pass
+                // behind, and a fly on a long circuit does so more often
+                // still, since a lap is the natural time to go round the
+                // back of something.
+                const float share = f.longFlight ? params.frontShare * 0.35f
+                                                 : params.frontShare;
+                f.inFront   = !toward || f.seekingLand || rnd() < share;
             }
         }
         // --- landing sequence ------------------------------------------
@@ -763,7 +793,7 @@ void FlySim::step(float dt)
                 // far side and the fly oscillated in place.
                 if (nd > 1.0f)
                     desired -= (rel / d) * speedMax
-                               * std::min(2.2f, 1.0f + (nd - 1.0f) * 3.5f);
+                               * std::min(3.2f, 1.0f + (nd - 1.0f) * 5.0f);
             }
         }
         // The bin sits on the floor of the Dock: there is no space behind
@@ -864,6 +894,39 @@ void FlySim::step(float dt)
             }
         }
         f.pos += f.vel * dt;
+
+        // Hard backstop on the roam region. The steering above is a
+        // FORCE, and a force cannot guarantee anything: at cruise speed a
+        // fly covers more ground in the time it takes to turn than the
+        // region is wide, so it sailed out through the overlay edge and
+        // got clipped by the window. This is deliberately outside the
+        // soft boundary — normal flight never touches it — and it exists
+        // so the overlay margins are a contract rather than a hope.
+        {
+            const QPointF rel2(f.pos.x() - c.x(), f.pos.y() - c.y());
+            const float rs2 = crawling ? 1.0f : params.flyRoamScale;
+            const float ry2 = (rel2.y() < 0 ? roamUp : roamDown) * rs2;
+            const float nx2 = float(rel2.x()) / (roamX * rs2);
+            const float ny2 = float(rel2.y()) / ry2;
+            const float nd2 = std::sqrt(nx2 * nx2 + ny2 * ny2);
+            constexpr float kHardEdge = 1.15f;
+            if (nd2 > kHardEdge) {
+                const float s = kHardEdge / nd2;
+                f.pos = c + QPointF(rel2.x() * s, rel2.y() * s);
+                // Drop the outward part of the velocity, keeping the
+                // tangential part, so a fly grazes along the edge rather
+                // than stopping dead against it.
+                const QPointF n(nx2 / nd2 / qMax(0.001f, roamX * rs2),
+                                ny2 / nd2 / qMax(0.001f, ry2));
+                const float nl = float(std::hypot(n.x(), n.y()));
+                if (nl > 0.0001f) {
+                    const QPointF u = n / nl;
+                    const float vn = float(QPointF::dotProduct(f.vel, u));
+                    if (vn > 0.0f)
+                        f.vel -= u * vn;
+                }
+            }
+        }
         // Hard backstop for the same rule. The steer above handles the
         // normal case; a dart impulse or a separation shove can still
         // punch a fly through in one step, and one frame of a fly inside

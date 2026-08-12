@@ -377,6 +377,45 @@ int main()
             return fail("the bin is left empty too often");
     }
 
+    // --- nothing lands behind the bin, and nothing pops into view -----
+    // Landing used to check only "am I over the bin", not "am I in
+    // front". A fly that arrived behind it is masked out completely, so
+    // landing there flipped it from the hidden batch to the clipped-to-
+    // surface batch and it appeared out of nowhere on the front.
+    {
+        const qreal side = 40.0;
+        FlySim s = makeSim(side, 1.0f, 97531);
+        s.setSurface(binSilhouette(24), 24, 24);
+
+        std::map<quint32, bool> wasHidden;   // masked out last frame?
+        int landedBehind = 0, pops = 0;
+        for (int i = 0; i < 3000; ++i) {
+            s.step(0.05f);
+            std::map<quint32, bool> now;
+            for (const Fly &f : s.flies()) {
+                if (f.mode == FlyMode::Crawling && !f.inFront && !f.leaving)
+                    ++landedBehind;
+                // A fly is invisible when it is behind the bin and over
+                // it: the mask erases it entirely.
+                const bool hidden = !f.inFront && !f.onSurface
+                                    && s.onSurfaceAt(f.pos);
+                const bool visible = !hidden && f.fade > 0.5f;
+                auto it = wasHidden.find(f.id);
+                if (it != wasHidden.end() && it->second && visible
+                    && s.onSurfaceAt(f.pos))
+                    ++pops;   // went from hidden to visible ON the bin
+                now[f.id] = hidden;
+            }
+            wasHidden.swap(now);
+        }
+        std::printf("landed while behind: %d; appeared on the bin: %d\n",
+                    landedBehind, pops);
+        if (landedBehind > 0)
+            return fail("flies land behind the bin, where they cannot be seen");
+        if (pops > 0)
+            return fail("flies pop into view on top of the bin");
+    }
+
     // --- walking covers ground ---------------------------------------
     // A crawler used to take its heading from the noise field sampled at
     // its own position, which changed as fast as it moved — so it pivoted

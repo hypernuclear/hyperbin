@@ -231,7 +231,7 @@ public:
         // length, which is its own kind of mechanical.
         float longFlightChance = 0.30f;
         float longFlyMin     = 2.6f;
-        float longFlyMax      = 6.0f;
+        float longFlyMax      = 8.0f;
 
         float takeoffRamp    = 0.55f;  // seconds spent getting up to speed
         float takeoffSpeed   = 0.38f;  // fraction of cruise at the instant of takeoff
@@ -241,10 +241,10 @@ public:
         // Flying is the default state; crawling is a brief visit. The
         // previous split had them settling almost as often as flying,
         // which read as a swarm that had given up.
-        float crawlMin       = 4.2f;   // seconds spent in each mode
-        float crawlMax       = 10.5f;
+        float crawlMin       = 5.0f;   // seconds spent in each mode
+        float crawlMax       = 13.0f;
         float flyMin         = 0.5f;
-        float flyMax         = 1.2f;
+        float flyMax         = 2.6f;
 
         /// Chance of actually settling when a flier passes over the bin
         /// with its timer up. Below 1 so most passes stay airborne.
@@ -254,7 +254,10 @@ public:
         /// population invariant: they drift, and the bin goes empty for
         /// seconds at a time purely by chance.
         int   minLanded      = 1;
-        int   preferLanded   = 2;
+        // Raised from 2 when landing was restricted to flies in front: a fly
+        // that arrives behind now has to come round before it can land, so
+        // more of them have to be heading in to keep the bin occupied.
+        int   preferLanded   = 3;
         // Stillness either side of the walk. A fly that lands and
         // immediately starts trundling reads as a machine on rails; the
         // pause is what makes the landing look like a decision.
@@ -303,11 +306,13 @@ public:
         float startleChance  = 0.002f;
         float freezeMin      = 0.35f;  // seconds held dead still
         float freezeMax      = 1.10f;
-        float boltSpeed      = 2.1f;   // multiple of normal flying speed
+        // Relative to cruise, and cruise is now 165 — at 2.1 a startled fly
+        // outran the containment shove entirely and left the overlay.
+        float boltSpeed      = 1.45f;   // multiple of normal flying speed
         float boltFor        = 0.75f;  // seconds of boosted flight
         float scatterMin     = 0.30f;  // seconds of flight before fading out
         float scatterMax     = 0.65f;
-        float scatterSpeed   = 2.6f;   // multiple of flying speed
+        float scatterSpeed   = 1.9f;   // multiple of flying speed
         // Cursor scatter. Radius is a multiple of the icon's WIDTH, so it
         // tracks Dock magnification like everything else. Keep it tight:
         // at 1.9 it reached almost two icons either side, so a pointer
@@ -322,7 +327,7 @@ public:
         // Four passes in front of the bin for every one behind. Behind is the
         // more interesting trick, but it hides the fly — as the majority it
         // just read as the swarm avoiding the front of the bin.
-        float frontShare     = 0.80f;  // fraction passing in front of the bin
+        float frontShare     = 0.60f;  // fraction passing in front of the bin
         /// Fliers throttle back while over the bin — they slow to look
         /// at it rather than barrelling straight past.
         float overBinSlow    = 0.6f;

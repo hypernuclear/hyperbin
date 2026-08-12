@@ -58,6 +58,7 @@ private:
     std::unique_ptr<QSystemTrayIcon> m_tray;
     std::unique_ptr<QMenu>           m_menu;
     QAction      *m_enable    = nullptr;
+    QAction      *m_login     = nullptr;
     QAction      *m_status    = nullptr;
     QAction      *m_problem   = nullptr;
     QActionGroup *m_typeGroup = nullptr;

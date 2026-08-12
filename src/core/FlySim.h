@@ -216,7 +216,16 @@ public:
     ///
     /// HYPERBIN_FLY_SIZE multiplies this at runtime for quick A/B, but
     /// editing here is the intended way to settle it.
+    ///
+    /// Per platform, because the two shells are not the same canvas. The
+    /// Dock tile is small and the flies sit right against it; the Recycle
+    /// Bin is a desktop icon, viewed against wallpaper rather than a
+    /// crowded Dock, and the same fly reads smaller there.
+#if defined(Q_OS_WIN)
     static constexpr qreal kFlyLengthAt40 = 4.5;
+#else
+    static constexpr qreal kFlyLengthAt40 = 4;
+#endif
 
     /// How much of the sprite's quad the visible fly actually fills. The
     /// rest is wings, drop shadow and transparent margin. Shared so the

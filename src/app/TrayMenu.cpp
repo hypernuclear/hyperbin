@@ -1,5 +1,6 @@
 #include "TrayMenu.h"
 
+#include "../platform/LaunchAtLogin.h"
 #include "Settings.h"
 
 #include <QAction>
@@ -36,6 +37,15 @@ TrayMenu::TrayMenu(Settings *settings, QObject *parent)
     m_tray = std::make_unique<QSystemTrayIcon>(trayIcon(), this);
     m_tray->setToolTip(QStringLiteral("hyperbin"));
     build();
+    connect(m_menu.get(), &QMenu::aboutToShow, this, [this] {
+        // The system owns this setting — the user can turn it off in
+        // System Settings, or delete the Startup shortcut — so it is read
+        // fresh on every open rather than cached.
+        if (m_login) {
+            QSignalBlocker b(m_login);
+            m_login->setChecked(launchAtLogin::isEnabled());
+        }
+    });
     m_tray->setContextMenu(m_menu.get());
     m_tray->show();
 
@@ -239,6 +249,24 @@ void TrayMenu::build()
     });
 
     m_menu->addSeparator();
+
+    // Open at login. Hidden entirely where we have no implementation,
+    // rather than shown as a switch that does nothing.
+    if (launchAtLogin::supported()) {
+        m_login = m_menu->addAction(QStringLiteral("Open at Login"));
+        m_login->setCheckable(true);
+        m_login->setChecked(launchAtLogin::isEnabled());
+        connect(m_login, &QAction::triggered, this, [this](bool on) {
+            // Reflect what the SYSTEM ended up doing, not what was asked.
+            // Registering can fail — an unsigned or relocated bundle on
+            // macOS, an unwritable Startup folder on Windows — and a tick
+            // that stays put regardless would be lying to the user.
+            const bool actual = launchAtLogin::setEnabled(on);
+            QSignalBlocker b(m_login);
+            m_login->setChecked(actual);
+        });
+    }
+
     auto *quit = m_menu->addAction(QStringLiteral("Quit hyperbin"));
     connect(quit, &QAction::triggered, this, &TrayMenu::quitRequested);
 

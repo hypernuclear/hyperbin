@@ -101,6 +101,10 @@ qt_add_executable(hyperbin
     src/platform/TrashTarget.h
     src/platform/StubTrashTarget.cpp
     src/platform/StubTrashTarget.h
+    src/platform/LaunchAtLogin.h
+    $<$<PLATFORM_ID:Darwin>:src/platform/LaunchAtLoginMac.mm>
+    $<$<PLATFORM_ID:Windows>:src/platform/LaunchAtLoginWin.cpp>
+    $<$<NOT:$<OR:$<PLATFORM_ID:Darwin>,$<PLATFORM_ID:Windows>>>:src/platform/LaunchAtLoginStub.cpp>
     $<$<PLATFORM_ID:Darwin>:src/platform/DockTrashTarget.mm>
     $<$<PLATFORM_ID:Darwin>:src/platform/MacOverlay.mm>
     $<$<PLATFORM_ID:Windows>:src/platform/RecycleBinTarget.cpp>
@@ -166,6 +170,8 @@ if(APPLE)
     target_link_libraries(hyperbin PRIVATE
         "-framework AppKit"
         "-framework ApplicationServices"
+        # SMAppService — registers the app in System Settings > Login Items.
+        "-framework ServiceManagement"
     )
 
     # Sign with a STABLE identity, even for local dev builds.

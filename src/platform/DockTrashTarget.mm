@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <QDir>
+#include <QDirIterator>
 #include <QFileInfo>
 #include <QStandardPaths>
 
@@ -341,9 +342,27 @@ void DockTrashTarget::pollTrash()
     if (n < 0)
         return; // couldn't tell; leave the last known count alone
 
+    // Size, when we're allowed to read the directory at all. Only
+    // recomputed on an mtime change, same as the count, so an idle bin
+    // costs one stat() per poll and nothing else.
+    qint64 bytes = -1;
+    if (m_directRead) {
+        bytes = 0;
+        QDirIterator it(path, QDir::Files | QDir::NoDotAndDotDot | QDir::Hidden
+                                  | QDir::System,
+                        QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            it.next();
+            bytes += it.fileInfo().size();
+        }
+    }
+    if (bytes != m_bytes) {
+        m_bytes = bytes;
+        emit byteSizeChanged(bytes);
+    }
     if (n == m_count)
         return;
-    qInfo("hyperbin: trash -> %d item(s)", n);
+    qInfo("hyperbin: trash -> %d item(s), %lld byte(s)", n, (long long)m_bytes);
     m_count = n;
     emit itemCountChanged(n);
 }

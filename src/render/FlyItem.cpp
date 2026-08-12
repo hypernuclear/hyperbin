@@ -22,6 +22,10 @@ constexpr int kSpritePx = 32;
 // Wing positions in the atlas. Four is enough at this size: a flap is
 // perceived as motion, not as distinct poses.
 constexpr int kFlyFrames = 4;
+// How often to check whether the pointer has left the bin, while the
+// swarm is scattered and nothing is being drawn. 200ms is imperceptible
+// for this and is the only wakeup the app has in that state.
+constexpr int kWatchMs = 200;
 } // namespace
 
 QImage FlyItem::buildSprite(int px)
@@ -98,6 +102,11 @@ FlyItem::FlyItem(QQuickItem *parent)
     setFlag(ItemHasContents, true);
     m_clock.setTimerType(Qt::PreciseTimer);
     connect(&m_clock, &QTimer::timeout, this, &FlyItem::tick);
+    // Coarse on purpose: it exists to notice a pointer leaving, and a
+    // coarse timer can be coalesced with other wakeups by the OS.
+    m_watch.setTimerType(Qt::CoarseTimer);
+    m_watch.setInterval(kWatchMs);
+    connect(&m_watch, &QTimer::timeout, this, &FlyItem::watchTick);
 }
 
 void FlyItem::setFullness(qreal f)
@@ -149,9 +158,11 @@ void FlyItem::tick()
     // click-through by design, so it never gets hover or move events at
     // all — the Dock beneath it does. One QCursor::pos() per frame is
     // cheap next to the frame itself.
-    const QPointF local = mapFromGlobal(QPointF(QCursor::pos()));
-    m_sim.setCursor(local, true);
+    m_sim.setCursor(cursorLocal(), true);
     m_sim.step(dt);
+    // Scattered: the pointer is on the bin and the last fly has gone.
+    // Rendering can stop completely until it moves away.
+    setScattered(m_sim.cursorOnBin() && m_sim.flies().isEmpty());
 
     // Tell the owner the moment the last fly leaves, so it can drop the
     // frame rate to zero and tear down the overlay surface.
@@ -163,6 +174,29 @@ void FlyItem::tick()
     update(); // the ONLY place a repaint is requested
 }
 
+QPointF FlyItem::cursorLocal() const
+{
+    return mapFromGlobal(QPointF(QCursor::pos()));
+}
+void FlyItem::setScattered(bool s)
+{
+    if (s == m_scattered)
+        return;
+    m_scattered = s;
+    // The watch runs only while scattered. Rendering is stopped in that
+    // state, so this is the only thing left awake — and the moment the
+    // pointer leaves it stops again.
+    if (s)
+        m_watch.start();
+    else
+        m_watch.stop();
+    emit scatteredChanged(s);
+}
+void FlyItem::watchTick()
+{
+    if (!m_binRect.contains(cursorLocal()))
+        setScattered(false);
+}
 QSGNode *FlyItem::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
 {
     const auto &flies = m_sim.flies();

@@ -45,18 +45,30 @@ public:
     void setBinIcon(const QImage &img);
 
     bool swarmIdle() const { return m_sim.isIdle(); }
+    /// True once the pointer has landed on the bin AND the swarm has
+    /// finished scattering. There is nothing left to animate at that
+    /// point, so the caller stops rendering entirely.
+    bool scattered() const { return m_scattered; }
 
 signals:
     void fullnessChanged();
     void frameIntervalMsChanged();
     void binRectChanged();
     void swarmWentIdle();
+    void scatteredChanged(bool scattered);
 
 protected:
     QSGNode *updatePaintNode(QSGNode *, UpdatePaintNodeData *) override;
 
 private:
     void tick();
+    /// Cursor in item-local pixels, and whether it is over the bin.
+    QPointF cursorLocal() const;
+    void    setScattered(bool s);
+    /// Cheap poll that runs ONLY while scattered, purely to notice the
+    /// pointer leaving. Rendering is stopped then, so without it nothing
+    /// would ever wake the swarm back up.
+    void watchTick();
 
     /// The fly artwork, drawn procedurally once at startup rather than
     /// shipped as an asset: body, wings, and a light rim that keeps it
@@ -71,9 +83,11 @@ private:
     QSGTexture   *m_texture = nullptr;     // sprite atlas
     QSGTexture   *m_maskTexture = nullptr; // bin silhouette
     QTimer        m_clock;
+    QTimer        m_watch;
     QElapsedTimer m_dt;
     int           m_intervalMs = 0;
     bool          m_wasIdle    = true;
+    bool          m_scattered  = false;
 };
 
 } // namespace hyperbin

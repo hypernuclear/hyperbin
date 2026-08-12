@@ -39,6 +39,11 @@ public:
 
     /// Item count in the trash. Drives fullness.
     virtual int itemCount() const = 0;
+    /// Total bytes in the trash, or -1 when it can't be read. Size is a
+    /// better measure of "how much rubbish" than a count — one 4GB video
+    /// outweighs forty screenshots — but on macOS reading ~/.Trash needs
+    /// Full Disk Access, so callers must handle -1 rather than assume it.
+    virtual qint64 byteSize() const { return -1; }
 
     /// Begin/stop watching. Nothing is polled until start() is called —
     /// an idle hyperbin must cost nothing (see docs/battery.md).
@@ -60,6 +65,8 @@ signals:
     void iconRectChanged(const QRect &r);
     /// Item count changed.
     void itemCountChanged(int count);
+    /// Trash size changed, in bytes; -1 when unreadable.
+    void byteSizeChanged(qint64 bytes);
     void statusChanged(Status s);
 
 protected:

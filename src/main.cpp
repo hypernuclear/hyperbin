@@ -1,8 +1,11 @@
+#include "app/Settings.h"
+#include "app/TrayMenu.h"
 #include "core/PowerPolicy.h"
 #include "platform/TrashTarget.h"
 #include "render/FlyItem.h"
 
-#include <QGuiApplication>
+#include <QApplication>
+#include <QLocale>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickWindow>
@@ -21,9 +24,15 @@ int main(int argc, char **argv)
     // requested before the first window exists.
     QQuickWindow::setDefaultAlphaBuffer(true);
 
-    QGuiApplication app(argc, argv);
+    // QApplication, not QGuiApplication: QSystemTrayIcon and QMenu are
+    // Widgets classes. The overlay itself is still pure Quick.
+    QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("hyperbin"));
     app.setOrganizationName(QStringLiteral("Hypernuclear"));
+    // The menu-bar item IS the app's UI, so the app must survive the
+    // overlay window being hidden — which happens whenever the bin is
+    // empty or the animation is switched off.
+    QApplication::setQuitOnLastWindowClosed(false);
 
     // Dev mode: a normal window instead of a click-through overlay, so
     // the simulation can be iterated on without fighting the shell.
@@ -31,6 +40,7 @@ int main(int argc, char **argv)
 
     auto target = TrashTarget::create();
     PowerPolicy power;
+    Settings settings;
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("windowedMode"), windowed);
@@ -82,9 +92,25 @@ int main(int argc, char **argv)
     QObject::connect(fly, &FlyItem::swarmWentIdle, &power,
                      [&] { power.setSwarmIdle(true); });
 
+    // Fullness comes from the SETTINGS, not straight from the bin: the
+    // three fixed densities deliberately ignore what's actually in there,
+    // and only the relative mode looks at the trash at all.
+    auto applyDensity = [&] {
+        const int n = target->itemCount();
+        fly->setFullness(n == 0 ? 0.0
+                                : settings.fullnessFor(target->byteSize(), n));
+    };
+    QObject::connect(&settings, &Settings::appearanceChanged, fly, applyDensity);
+    QObject::connect(target.get(), &TrashTarget::byteSizeChanged, fly,
+                     [&](qint64) { applyDensity(); });
+
+    // Pointer on the bin: the swarm scatters, then rendering stops dead
+    // until it leaves. FlyItem keeps one coarse timer alive to notice.
+    QObject::connect(fly, &FlyItem::scatteredChanged, &power,
+                     [&](bool s) { power.setScattered(s); });
+
     QObject::connect(target.get(), &TrashTarget::itemCountChanged, fly, [&](int n) {
-        // Saturate at ~40 items; beyond that it's already a cloud.
-        fly->setFullness(qMin(1.0, n / 40.0));
+        applyDensity();
         power.setBinEmpty(n == 0);
         // Full and empty are different artwork; refresh when it flips.
         const QRect ir = target->iconRect();
@@ -135,10 +161,56 @@ int main(int argc, char **argv)
         dbg->start();
     }
 
-    target->start();
+    // --- menu-bar item --------------------------------------------------
+    TrayMenu tray(&settings);
+    if (!tray.available())
+        qWarning("hyperbin: no system tray is available; the app is running "
+                 "with no way to configure or quit it");
+    QObject::connect(&tray, &TrayMenu::quitRequested, &app, &QApplication::quit);
+
+    auto describeTrash = [&]() -> QString {
+        const int n = target->itemCount();
+        if (n == 0)
+            return QStringLiteral("Trash is empty");
+        const QString items = QStringLiteral("%1 item%2")
+            .arg(n).arg(n == 1 ? QString() : QStringLiteral("s"));
+        const qint64 b = target->byteSize();
+        // byteSize() is -1 when ~/.Trash can't be read, which is the
+        // normal case without Full Disk Access. Say what we know rather
+        // than showing a wrong or empty size.
+        if (b < 0)
+            return QStringLiteral("Trash: ") + items;
+        return QStringLiteral("Trash: %1, %2")
+            .arg(items, QLocale().formattedDataSize(b));
+    };
+    auto refreshStatus = [&] { tray.setStatusText(describeTrash()); };
+    QObject::connect(target.get(), &TrashTarget::itemCountChanged, &tray,
+                     [&](int) { refreshStatus(); });
+    QObject::connect(target.get(), &TrashTarget::byteSizeChanged, &tray,
+                     [&](qint64) { refreshStatus(); });
+
+    // --- master switch ----------------------------------------------------
+    // Off means genuinely off: no frames, no overlay surface, and the
+    // trash poll stopped as well. Leaving the poll running would be a
+    // background app doing work the user has just told it not to do.
+    auto applyEnabled = [&](bool on) {
+        power.setEnabled(on);
+        if (on) {
+            target->start();
+            power.setBinEmpty(target->itemCount() == 0);
+            power.setTargetVisible(target->status() == TrashTarget::Status::Ok);
+        } else {
+            target->stop();
+            if (win)
+                win->setVisible(false);
+        }
+        refreshStatus();
+    };
+    QObject::connect(&settings, &Settings::enabledChanged, &app,
+                     [&](bool on) { applyEnabled(on); });
+
     power.setSwarmIdle(true);
-    power.setBinEmpty(target->itemCount() == 0);
-    power.setTargetVisible(target->status() == TrashTarget::Status::Ok);
+    applyEnabled(settings.enabled());
 
     return app.exec();
 }

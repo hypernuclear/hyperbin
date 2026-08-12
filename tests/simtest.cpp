@@ -1,6 +1,7 @@
 // Headless checks for the swarm's contract: how many flies, how long
 // they live, where they're allowed to go, and that it all stops.
 #include "FlySim.h"
+#include "Settings.h"
 
 #include <QRectF>
 #include <algorithm>
@@ -329,6 +330,47 @@ int main()
         std::printf("emptied: idle after %.1fs (%lld left)\n",
                     steps * 0.05, (long long)s.flies().size());
         if (!s.isIdle()) return fail("swarm never went idle");
+    }
+
+    // --- density settings ---------------------------------------------
+    // The three fixed steps are thirds by design, so they line up with
+    // the relative mode's scale instead of being arbitrary numbers.
+    {
+        // Throwaway store: never the user's real preferences.
+        Settings s(nullptr, QStringLiteral("hyperbin-selftest"));
+        const qint64 mb = 1024 * 1024;
+
+        s.setDensity(Settings::Density::Few);
+        if (std::abs(s.fullnessFor(0, 0) - 1.0 / 3.0) > 1e-9)
+            return fail("'a few flies' is not a third");
+        s.setDensity(Settings::Density::Lots);
+        if (std::abs(s.fullnessFor(0, 0) - 2.0 / 3.0) > 1e-9)
+            return fail("'lots of flies' is not two thirds");
+        s.setDensity(Settings::Density::TooMany);
+        if (std::abs(s.fullnessFor(0, 0) - 1.0) > 1e-9)
+            return fail("'too many flies' is not full");
+        // Fixed densities must ignore the bin entirely — that is the
+        // whole reason to offer them.
+        if (s.fullnessFor(0, 0) != s.fullnessFor(50 * mb, 12))
+            return fail("a fixed density still looks at the trash");
+
+        s.setDensity(Settings::Density::Relative);
+        s.setThreshold(Settings::Threshold::HundredMB);
+        if (s.fullnessFor(0, 0) != 0.0)
+            return fail("an empty bin should draw nothing");
+        if (std::abs(s.fullnessFor(50 * mb, 3) - 0.5) > 1e-9)
+            return fail("half the threshold should be half full");
+        if (std::abs(s.fullnessFor(500 * mb, 3) - 1.0) > 1e-9)
+            return fail("past the threshold should saturate, not overflow");
+        s.setThreshold(Settings::Threshold::OneGB);
+        if (std::abs(s.fullnessFor(50 * mb, 3) - 50.0 / 1024.0) > 1e-9)
+            return fail("threshold change does not rescale");
+        // No size available (no Full Disk Access) must fall back to the
+        // count rather than reporting an empty bin.
+        if (s.fullnessFor(-1, 20) <= 0.0)
+            return fail("unreadable trash size should fall back to the count");
+        s.clearStore();
+        std::printf("density: thirds, relative scaling and fallback all hold\n");
     }
 
     std::printf("PASS\n");

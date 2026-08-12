@@ -24,10 +24,18 @@ void PowerPolicy::setTargetVisible(bool v) { if (m_targetVisible != v) { m_targe
 void PowerPolicy::setDisplayAwake(bool v)  { if (m_displayAwake  != v) { m_displayAwake  = v; bump(); } }
 void PowerPolicy::setOnBattery(bool v)     { if (m_onBattery     != v) { m_onBattery     = v; bump(); } }
 void PowerPolicy::setLowPowerMode(bool v)  { if (m_lowPower      != v) { m_lowPower      = v; bump(); } }
+void PowerPolicy::setEnabled(bool v)       { if (m_enabled       != v) { m_enabled       = v; bump(); } }
+void PowerPolicy::setScattered(bool v)     { if (m_scattered     != v) { m_scattered     = v; bump(); } }
 
 bool PowerPolicy::shouldRender() const
 {
     // Hard stops: nothing to draw, or nobody to see it.
+    if (!m_enabled)
+        return false;
+    // Pointer on the bin. The flies have already flown off, so there is
+    // genuinely nothing to draw — this is not a throttle, it's a stop.
+    if (m_scattered)
+        return false;
     if (!m_displayAwake || !m_targetVisible)
         return false;
     if (m_lowPower)

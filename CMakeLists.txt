@@ -39,7 +39,7 @@ if(NOT CMAKE_PREFIX_PATH)
     endif()
 endif()
 
-find_package(Qt6 6.11 QUIET COMPONENTS Core Gui Qml Quick QuickControls2 ShaderTools)
+find_package(Qt6 6.11 QUIET COMPONENTS Core Gui Widgets Svg Qml Quick QuickControls2 ShaderTools)
 if(NOT Qt6_FOUND)
     message(FATAL_ERROR
         "Qt 6.11+ not found.\n"
@@ -50,11 +50,17 @@ if(NOT Qt6_FOUND)
         "In VS Code, select the 'local' preset rather than 'dev' if you\n"
         "have a CMakeUserPresets.json.")
 endif()
-find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 ShaderTools)
+find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Widgets Svg Qml Quick QuickControls2 ShaderTools)
 qt_standard_project_setup(REQUIRES 6.11)
 
 qt_add_executable(hyperbin
     src/main.cpp
+    src/app/BinGlyph.cpp
+    src/app/BinGlyph.h
+    src/app/Settings.cpp
+    src/app/Settings.h
+    src/app/TrayMenu.cpp
+    src/app/TrayMenu.h
     src/core/FlySim.cpp
     src/core/FlySim.h
     src/core/PowerPolicy.cpp
@@ -82,25 +88,32 @@ qt_add_shaders(hyperbin "hyperbin_shaders"
 qt_add_qml_module(hyperbin
     URI hyperbin
     VERSION 1.0
-    QML_FILES qml/Main.qml
+    QML_FILES qml/Main.qml qml/BinGlyph.qml
 )
 
 # qmltyperegistrations.cpp includes the QML_ELEMENT headers by basename,
 # so their directories have to be on the include path, not just src/.
 target_include_directories(hyperbin PRIVATE
     src
+    src/app
     src/core
     src/render
     src/platform
 )
 target_link_libraries(hyperbin PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg
+    Qt6::Qml Qt6::Quick Qt6::QuickControls2
+)
+qt_add_resources(hyperbin "hyperbin_icons"
+    PREFIX "/icons"
+    BASE resources
+    FILES resources/hyperbin.svg
 )
 
 # Headless swarm check. No GUI, so it runs on CI and under the debugger
 # without a display.
-add_executable(simtest tests/simtest.cpp src/core/FlySim.cpp)
-target_include_directories(simtest PRIVATE src/core)
+add_executable(simtest tests/simtest.cpp src/core/FlySim.cpp src/app/Settings.cpp)
+target_include_directories(simtest PRIVATE src/core src/app)
 target_link_libraries(simtest PRIVATE Qt6::Core)
 
 # Overlay app: no Dock icon, no menu bar. LSUIElement keeps it a

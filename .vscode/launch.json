@@ -79,7 +79,6 @@
         // other shape, so {"VAR": "1"} looks right and does nothing.
         // { "name": "HYPERBIN_SHOW_BINRECT", "value": "1" }
         // { "name": "HYPERBIN_BIN_ADJUST", "value": "5,0,1" } // dx,dy,scale
-        { "name": "HYPERBIN_CALIBRATE", "value": "x8" } // dx,dy,scale
         // { "name": "HYPERBIN_DEBUG", "value": "1" }
       ],
       "args": [],

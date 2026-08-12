@@ -23,6 +23,7 @@ public:
     Status status() const override { return m_status; }
     QRect  iconRect() const override { return m_rect; }
     int    itemCount() const override { return m_count; }
+    qint64 byteSize() const override { return m_bytes; }
     void   start() override;
     void   stop() override;
     void   openRemediation() override;
@@ -49,6 +50,7 @@ private:
 
     QRect     m_rect;
     int       m_count  = 0;
+    qint64    m_bytes  = -1;  // -1 = ~/.Trash not readable
     Status    m_status = Status::NotFound;
     // Frame rate, not a compromise: one AX position+size round-trip was
     // measured at 0.039ms, so 60Hz costs ~0.2% of a core. Polling slower

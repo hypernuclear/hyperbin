@@ -5,3 +5,4 @@ CMakeUserPresets.json
 *.user
 *.user.*
 CMakeLists.txt.user*
+.qtcreator

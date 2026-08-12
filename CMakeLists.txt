@@ -27,8 +27,29 @@ if(NOT CMAKE_PREFIX_PATH)
     else()
         if(APPLE)
             file(GLOB _qt_dirs "$ENV{HOME}/Qt/6.*/macos")
+        elseif(WIN32)
+            # Windows ships one Qt build per ABI, and a cross-ABI Qt links no
+            # better than a missing one — so match whatever compiler was
+            # selected rather than assuming MSVC. (Only reached when nothing
+            # supplied a Qt: a Qt Creator kit always passes CMAKE_PREFIX_PATH,
+            # so this is the bare `cmake -S . -B build` path.) The online
+            # installer defaults to C:/Qt; a per-user install lands under the
+            # profile directory instead.
+            if(MSVC)
+                set(_qt_abi "msvc*")
+            else()
+                set(_qt_abi "*mingw*")
+            endif()
+            file(GLOB _qt_dirs "C:/Qt/6.*/${_qt_abi}" "$ENV{USERPROFILE}/Qt/6.*/${_qt_abi}")
+            # Both "msvc2022_64" and "msvc2022_arm64" match the glob above, and
+            # a descending sort prefers the arm64 one. Keep only the target arch.
+            if(CMAKE_SYSTEM_PROCESSOR MATCHES "[Aa][Rr][Mm]64")
+                list(FILTER _qt_dirs INCLUDE REGEX "arm64$")
+            else()
+                list(FILTER _qt_dirs EXCLUDE REGEX "arm64$")
+            endif()
         else()
-            file(GLOB _qt_dirs "$ENV{HOME}/Qt/6.*/gcc_64" "C:/Qt/6.*/msvc*")
+            file(GLOB _qt_dirs "$ENV{HOME}/Qt/6.*/gcc_64")
         endif()
         if(_qt_dirs)
             list(SORT _qt_dirs COMPARE NATURAL ORDER DESCENDING)
@@ -41,14 +62,25 @@ endif()
 
 find_package(Qt6 6.11 QUIET COMPONENTS Core Gui Widgets Svg Qml Quick QuickControls2 ShaderTools)
 if(NOT Qt6_FOUND)
-    message(FATAL_ERROR
-        "Qt 6.11+ not found.\n"
-        "Point the build at it in any one of these ways:\n"
-        "  export QT_ROOT=~/Qt/6.11.1/macos\n"
-        "  cmake --preset dev -DCMAKE_PREFIX_PATH=~/Qt/6.11.1/macos\n"
-        "  create CMakeUserPresets.json with a preset inheriting 'dev'\n"
-        "In VS Code, select the 'local' preset rather than 'dev' if you\n"
-        "have a CMakeUserPresets.json.")
+    if(WIN32)
+        message(FATAL_ERROR
+            "Qt 6.11+ not found.\n"
+            "Point the build at it in any one of these ways:\n"
+            "  set QT_ROOT=C:\\Qt\\6.11.1\\msvc2022_64\n"
+            "  cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH=C:/Qt/6.11.1/msvc2022_64\n"
+            "In Qt Creator, pick a kit that already has a Qt version bound to\n"
+            "it (Desktop Qt 6.11.1 MSVC2022 64bit) — the presets are macOS/Linux\n"
+            "only on purpose, see CMakePresets.json.")
+    else()
+        message(FATAL_ERROR
+            "Qt 6.11+ not found.\n"
+            "Point the build at it in any one of these ways:\n"
+            "  export QT_ROOT=~/Qt/6.11.1/macos\n"
+            "  cmake --preset dev -DCMAKE_PREFIX_PATH=~/Qt/6.11.1/macos\n"
+            "  create CMakeUserPresets.json with a preset inheriting 'dev'\n"
+            "In VS Code, select the 'local' preset rather than 'dev' if you\n"
+            "have a CMakeUserPresets.json.")
+    endif()
 endif()
 find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Widgets Svg Qml Quick QuickControls2 ShaderTools)
 qt_standard_project_setup(REQUIRES 6.11)

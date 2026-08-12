@@ -15,10 +15,34 @@ decisions and `docs/battery.md` for the power budget.
 
 ## Build
 
+macOS / Linux:
+
 ```sh
 sh scripts/install-hooks.sh          # once per clone — see Secrets below
 cmake --preset dev && cmake --build --preset dev
 ```
+
+Windows — the presets are deliberately disabled here (`cmake --preset dev`
+answers "Could not use disabled preset"). Build from a **Developer Command
+Prompt for VS**, which is what puts `cl.exe` on PATH:
+
+```bat
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+Ninja ships with Qt at `C:\Qt\Tools\Ninja` if it isn't already on PATH.
+
+In Qt Creator on Windows, use a normal kit — *Desktop Qt 6.11.1 MSVC2022
+64bit* — not a "(CMake preset)" build configuration. Qt Creator derives a
+kit from every enabled preset, and a preset that names no compiler yields
+a kit with no toolchain and no Qt: it then configures with the NMake
+generator outside the MSVC environment and dies on `nmake -?` / "no such
+file or directory". Naming the compiler in the preset doesn't help — Qt
+Creator matches a toolchain by absolute `cl.exe` path, which is
+machine-specific and can't be committed — so the presets simply stop at
+the Windows boundary and leave kit selection to the IDE. This is how
+Hypershot builds on both platforms too.
 
 Qt's location is never committed. The build auto-detects the newest
 `~/Qt/6.*` install; override with `QT_ROOT`, with

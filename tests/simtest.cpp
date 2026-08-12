@@ -6,6 +6,7 @@
 #include <QRectF>
 #include <algorithm>
 #include <map>
+#include <set>
 #include <vector>
 #include <cmath>
 #include <cstdio>
@@ -86,23 +87,40 @@ int main()
         if (minSeen < 1) return fail("one item in the bin should still draw a fly");
     }
 
-    // --- turnover: flies come and go rather than persisting forever ---
+    // --- flies persist ------------------------------------------------
+    // There is no lifespan. Rubbish does not stop attracting flies after
+    // a few seconds, and the constant churn of arrivals and departures
+    // was motion the eye kept getting drawn to for no reason.
     {
         FlySim s = makeSim(40, 1.0f);
-        for (int i = 0; i < 100; ++i) s.step(0.05f);
-        int departures = 0, wasLeaving = 0;
-        for (int i = 0; i < 600; ++i) { // 30s
-            s.step(0.05f);
-            int leaving = 0;
-            for (const Fly &f : s.flies())
-                if (f.leaving) ++leaving;
-            if (leaving > wasLeaving) departures += leaving - wasLeaving;
-            wasLeaving = leaving;
-        }
-        // Lifetimes are 2-6s, so 30s across up to 6 slots should retire a
-        // good number of flies.
-        std::printf("turnover: %d departures in 30s\n", departures);
-        if (departures < 10) return fail("flies are not being replaced");
+        for (int i = 0; i < 200; ++i) s.step(0.05f);   // let it fill up
+        std::set<quint32> early;
+        for (const Fly &f : s.flies()) early.insert(f.id);
+        if (early.empty()) return fail("no swarm to follow");
+
+        for (int i = 0; i < 1200; ++i) s.step(0.05f);  // 60 more seconds
+        int survivors = 0;
+        for (const Fly &f : s.flies())
+            if (early.count(f.id)) ++survivors;
+        std::printf("persistence: %d of %zu flies still around after 60s\n",
+                    survivors, early.size());
+        if (survivors < int(early.size()))
+            return fail("flies are disappearing on their own");
+    }
+
+    // --- the swarm shrinks when the bin does --------------------------
+    // With nothing expiring, this is now the ONLY thing that removes a
+    // fly short of the pointer arriving, so it has to work.
+    {
+        FlySim s = makeSim(40, 1.0f);
+        for (int i = 0; i < 300; ++i) s.step(0.05f);
+        const int before = int(s.flies().size());
+        s.setFullness(0.15f);
+        for (int i = 0; i < 600; ++i) s.step(0.05f);
+        const int after = int(s.flies().size());
+        std::printf("less rubbish: swarm %d -> %d\n", before, after);
+        if (after >= before) return fail("swarm does not shrink with the bin");
+        if (after < 1)       return fail("swarm shrank past the floor");
     }
 
     // --- movement: both modes actually occur ---
@@ -273,25 +291,26 @@ int main()
     {
         FlySim s = makeSim(40, 1.0f, 4711);
         s.params.startleChance = 0.25f;   // startle constantly
-        int frozen = 0, boltingSeen = 0;
-        double lifeAfterBolt = 0;
+        int frozen = 0, boltingSeen = 0, boltRetiring = 0;
         for (int i = 0; i < 1200; ++i) {
             s.step(0.05f);
             for (const Fly &f : s.flies()) {
                 if (f.freezeLeft > 0.0f) ++frozen;
                 if (f.bolting) {
                     ++boltingSeen;
-                    lifeAfterBolt = std::max(lifeAfterBolt, double(f.life));
+                    if (f.retiring || f.leaving) ++boltRetiring;
                 }
             }
         }
-        std::printf("startle: %d frozen samples, %d bolting, max life left %.1fs\n",
-                    frozen, boltingSeen, lifeAfterBolt);
+        std::printf("startle: %d frozen samples, %d bolting, %d of those leaving\n",
+                    frozen, boltingSeen, boltRetiring);
         if (frozen == 0) return fail("flies never freeze");
         if (boltingSeen == 0) return fail("flies freeze but never bolt");
-        // A bolting fly must still have a normal amount of life ahead of
-        // it — that is the difference between flying off and blinking out.
-        if (lifeAfterBolt < 1.0) return fail("bolting flies are killed off immediately");
+        // A startle is a burst, not a death: the fly rejoins the swarm
+        // afterwards. Flies have no lifespan at all now, so any bolting
+        // fly that is also leaving was retired for an unrelated reason.
+        if (boltRetiring > boltingSeen / 2)
+            return fail("bolting flies are being retired immediately");
     }
     // --- landing sequence --------------------------------------------
     // The intended read is: fly in, touch down, sit still, walk a bit,

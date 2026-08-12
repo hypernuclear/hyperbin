@@ -93,6 +93,36 @@ void FlySim::setBinRect(const QRectF &r)
     m_bin = r;
 }
 
+void FlySim::trimSwarm(int want)
+{
+    // With no lifespan, nothing else ever removes a fly. When the bin
+    // gets emptier the swarm has to shrink, so the surplus is retired
+    // here — one at a time, so the swarm thins out rather than vanishing
+    // in a block.
+    int staying = 0;
+    for (const Fly &f : m_flies)
+        if (!f.leaving && !f.retiring)
+            ++staying;
+    if (staying <= want)
+        return;
+
+    // Retire a flier before a crawler: a fly leaving the bin is more
+    // conspicuous than one already in the air, and the landing floor
+    // wants the bin occupied anyway.
+    Fly *pick = nullptr;
+    for (Fly &f : m_flies) {
+        if (f.leaving || f.retiring)
+            continue;
+        if (!pick || (pick->mode == FlyMode::Crawling
+                      && f.mode == FlyMode::Flying))
+            pick = &f;
+    }
+    if (pick) {
+        pick->retiring  = true;
+        pick->retireFor = 0.0f;
+    }
+}
+
 void FlySim::manageLandings()
 {
     // Hold a floor of flies ON the bin. Per-fly timers can't express this
@@ -216,9 +246,20 @@ int FlySim::desiredCount() const
 
 void FlySim::enterMode(Fly &f, FlyMode m)
 {
+    // Taking off: start the speed ramp. Entering Flying from Flying (a
+    // fresh circuit) doesn't re-ramp — it is already moving.
+    if (m == FlyMode::Flying && f.mode == FlyMode::Crawling)
+        f.takeoffLeft = params.takeoffRamp;
     f.mode = m;
-    f.modeLeft = (m == FlyMode::Crawling) ? rndRange(params.crawlMin, params.crawlMax)
-                                          : rndRange(params.flyMin, params.flyMax);
+    if (m == FlyMode::Crawling) {
+        f.modeLeft   = rndRange(params.crawlMin, params.crawlMax);
+        f.longFlight = false;
+    } else {
+        f.longFlight = rnd() < params.longFlightChance;
+        f.modeLeft   = f.longFlight
+            ? rndRange(params.longFlyMin, params.longFlyMax)
+            : rndRange(params.flyMin, params.flyMax);
+    }
     if (m == FlyMode::Crawling) {
         // Land, then hold still for a beat before walking anywhere.
         f.crawlStage = 0;
@@ -277,7 +318,6 @@ void FlySim::spawnFly()
     // Mild size variation only — enough to break up uniformity,
     // not enough to read as flies being at different depths.
     f.scale       = rndRange(0.9f, 1.1f);
-    f.life        = rndRange(params.lifeMin, params.lifeMax);
     f.fade        = 0.0f;
     f.leaving     = false;
     // Spawns start outside the icon heading away from it, so they begin
@@ -346,6 +386,7 @@ void FlySim::step(float dt)
     manageLandings();
 
     const int want = desiredCount();
+    trimSwarm(want);
 
     // Count only the flies that are staying — a departing one has already
     // given up its slot, so its replacement overlaps with it and the
@@ -375,27 +416,29 @@ void FlySim::step(float dt)
         Fly &f = m_flies[i];
 
         // --- lifecycle -------------------------------------------------
+        // Flies do not expire. There is no lifespan any more: rubbish
+        // doesn't stop attracting flies after six seconds, and the
+        // constant churn of arrivals and departures was motion the eye
+        // kept getting drawn to for no reason. A fly leaves for exactly
+        // three reasons, all of them things that actually happened —
+        // the pointer arrived (scatter), the bin emptied, or the swarm
+        // has to shrink because there is less rubbish (see trimSwarm).
         if (f.scatterLeft > 0.0f) {
             f.scatterLeft -= dt;
             if (f.scatterLeft <= 0.0f)
                 f.leaving = true;
         }
-        if (!f.leaving) {
-            f.life -= dt;
-            // Fading out on top of the bin looks like a fly winking out of
-            // existence, because the bin gives the eye a fixed reference
-            // right behind it. Expired flies take off and only begin to
-            // fade once they're clear of the icon — the disappearance then
-            // reads as one flying off. The -2s floor stops a fly that
-            // can't get clear (a shrinking Dock tile, say) from living on.
-            if (f.life <= 0.0f) {
-                f.seekingLand = false;
-                if (f.mode == FlyMode::Crawling)
-                    enterMode(f, FlyMode::Flying); // always leaves on the wing
-                if (!m_bin.contains(f.pos) || f.life <= -2.0f) {
-                    f.leaving = true;
-                    enterMode(f, FlyMode::Flying);
-                }
+        // A fly told to go finishes on the wing and only starts fading
+        // once it is clear of the icon, so it reads as flying off rather
+        // than winking out against the bin.
+        if (f.retiring && !f.leaving) {
+            f.seekingLand = false;
+            if (f.mode == FlyMode::Crawling)
+                enterMode(f, FlyMode::Flying);
+            f.retireFor += dt;
+            if (!m_bin.contains(f.pos) || f.retireFor > 2.0f) {
+                f.leaving = true;
+                enterMode(f, FlyMode::Flying);
             }
         }
         // Fade in on arrival, out on departure — but only while clear of
@@ -448,7 +491,8 @@ void FlySim::step(float dt)
                     enterMode(f, FlyMode::Flying);   // done crawling
                 } else {
                     enterMode(f, FlyMode::Flying);   // another circuit
-                    f.seekingLand = rnd() < params.landChance;
+                    f.seekingLand = !f.longFlight
+                                    && rnd() < params.landChance;
                     if (f.seekingLand)
                         f.landTarget = surfaceTarget();
                 }
@@ -498,6 +542,10 @@ void FlySim::step(float dt)
                         f.modeLeft   = rndRange(params.crawlMin, params.crawlMax);
                     } else {
                         enterMode(f, FlyMode::Flying); // paused; now leave
+                        f.seekingLand = !f.longFlight
+                                        && rnd() < params.landChance;
+                        if (f.seekingLand)
+                            f.landTarget = surfaceTarget();
                     }
                 }
             }
@@ -557,6 +605,33 @@ void FlySim::step(float dt)
         // heading threshold below must not scale with it or a dawdling
         // crawler would start spinning again.
         const float cruise = speedMax;
+
+        // --- flight speed envelope -------------------------------------
+        // Slow off the mark, quick in the middle, slow onto the bin. The
+        // ramp is smoothstepped rather than linear so there is no corner
+        // at either end of it.
+        if (!crawling && !f.leaving) {
+            float env = 1.0f;
+            if (f.takeoffLeft > 0.0f) {
+                f.takeoffLeft -= dt;
+                const float u = std::clamp(
+                    1.0f - f.takeoffLeft / qMax(0.001f, params.takeoffRamp),
+                    0.0f, 1.0f);
+                const float e = u * u * (3.0f - 2.0f * u);
+                env *= params.takeoffSpeed + (1.0f - params.takeoffSpeed) * e;
+            }
+            if (f.seekingLand) {
+                const QPointF d = f.landTarget - f.pos;
+                const float dist = float(std::hypot(d.x(), d.y()));
+                const float range = params.approachRange * halfW * 2.0f;
+                if (dist < range) {
+                    const float u = std::clamp(dist / qMax(1.0f, range), 0.0f, 1.0f);
+                    const float e = u * u * (3.0f - 2.0f * u);
+                    env *= params.approachSlow + (1.0f - params.approachSlow) * e;
+                }
+            }
+            speedMax *= env;
+        }
         if (crawling)
             speedMax *= f.pace;
         if (frozen || paused)

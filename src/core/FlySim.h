@@ -45,7 +45,11 @@ struct Fly
 
     FlyMode mode     = FlyMode::Flying;
     float   modeLeft = 0.0f; // seconds until it switches mode
-    float   life     = 0.0f; // seconds until it leaves
+    /// Told to go, but not yet fading — it still has to get clear of the
+    /// bin first. Flies have no lifespan; see the lifecycle note in
+    /// step() for the only three things that set this.
+    bool    retiring  = false;
+    float   retireFor = 0.0f;
     float   fade     = 0.0f; // 0-1 opacity, ramps on arrival and departure
     bool    leaving  = false;
 
@@ -75,6 +79,14 @@ struct Fly
     /// from the noise field, which changes as fast as it moves, so it
     /// pivoted constantly instead of walking anywhere.
     float   walkAngle = 0.0f;
+    /// Seconds left of the takeoff ramp. Flight speed is an envelope,
+    /// not a constant: a fly that leaves the bin at full cruise and
+    /// arrives at full cruise reads as being on rails.
+    float   takeoffLeft = 0.0f;
+    /// This flight is a long circuit rather than a hop to the next spot
+    /// on the bin. Set when the flight starts, so the landing roll knows
+    /// to leave this one alone.
+    bool    longFlight  = false;
     /// Crawling pace, re-rolled every second or so. A crawler that moves
     /// at one steady speed reads as a machine; real ones surge and stall.
     float   pace     = 1.0f;
@@ -210,7 +222,21 @@ public:
         float fadeTime       = 0.40f;  // arrival/departure ramp
 
         float crawlSpeed     = 9.0f;   // px/sec — a slow potter
-        float flySpeed       = 104.0f;  // px/sec — actual flying
+        float flySpeed       = 350.0f;
+        // Speed envelope across a flight: push off gently, cruise, then
+        // ease down onto the bin. Constant speed was the single most
+        // mechanical-looking thing left in the swarm.
+        // Every so often a fly takes a proper lap instead of hopping
+        // straight back down. Without this every flight is the same
+        // length, which is its own kind of mechanical.
+        float longFlightChance = 0.30f;
+        float longFlyMin     = 2.6f;
+        float longFlyMax      = 6.0f;
+
+        float takeoffRamp    = 0.55f;  // seconds spent getting up to speed
+        float takeoffSpeed   = 0.38f;  // fraction of cruise at the instant of takeoff
+        float approachSlow   = 0.40f;  // fraction of cruise on touchdown
+        float approachRange  = 1.10f;  // where the approach begins, in icon widths  // px/sec — actual flying
 
         // Flying is the default state; crawling is a brief visit. The
         // previous split had them settling almost as often as flying,
@@ -324,6 +350,8 @@ private:
     float  rndRange(float lo, float hi) { return lo + rnd() * (hi - lo); }
     void   spawnFly();
     void   enterMode(Fly &f, FlyMode m);
+    /// Retire surplus flies when the bin has less in it than before.
+    void   trimSwarm(int want);
     /// A point on the bin's surface, for a fly to aim at. Falls back to
     /// the rect centre when no silhouette is known.
     QPointF surfaceTarget();

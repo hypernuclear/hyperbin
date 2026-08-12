@@ -42,9 +42,9 @@ Window {
         border.width: 1
     }
 
-    FlyItem {
+    EffectItem {
         id: flies
-        objectName: "flies"
+        objectName: "effect"
         anchors.fill: parent
 
         // In windowed dev mode nothing drives these, so give the sim a

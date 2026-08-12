@@ -19,13 +19,14 @@ PowerPolicy::PowerPolicy(QObject *parent)
 }
 
 void PowerPolicy::setBinEmpty(bool v)      { if (m_binEmpty      != v) { m_binEmpty      = v; bump(); } }
-void PowerPolicy::setSwarmIdle(bool v)     { if (m_swarmIdle     != v) { m_swarmIdle     = v; bump(); } }
+void PowerPolicy::setEffectIdle(bool v)    { if (m_effectIdle    != v) { m_effectIdle    = v; bump(); } }
+void PowerPolicy::setEffectAtRest(bool v)  { if (m_effectAtRest  != v) { m_effectAtRest  = v; bump(); } }
 void PowerPolicy::setTargetVisible(bool v) { if (m_targetVisible != v) { m_targetVisible = v; bump(); } }
 void PowerPolicy::setDisplayAwake(bool v)  { if (m_displayAwake  != v) { m_displayAwake  = v; bump(); } }
 void PowerPolicy::setOnBattery(bool v)     { if (m_onBattery     != v) { m_onBattery     = v; bump(); } }
 void PowerPolicy::setLowPowerMode(bool v)  { if (m_lowPower      != v) { m_lowPower      = v; bump(); } }
 void PowerPolicy::setEnabled(bool v)       { if (m_enabled       != v) { m_enabled       = v; bump(); } }
-void PowerPolicy::setScattered(bool v)     { if (m_scattered     != v) { m_scattered     = v; bump(); } }
+void PowerPolicy::setDismissed(bool v)     { if (m_dismissed     != v) { m_dismissed     = v; bump(); } }
 
 bool PowerPolicy::shouldRender() const
 {
@@ -34,14 +35,14 @@ bool PowerPolicy::shouldRender() const
         return false;
     // Pointer on the bin. The flies have already flown off, so there is
     // genuinely nothing to draw — this is not a throttle, it's a stop.
-    if (m_scattered)
+    if (m_dismissed)
         return false;
     if (!m_displayAwake || !m_targetVisible)
         return false;
     if (m_lowPower)
         return false;
-    // An empty bin costs zero — but let an emptying swarm fly away first.
-    if (m_binEmpty && m_swarmIdle)
+    // An empty bin costs zero — but let a departing effect finish first.
+    if (m_binEmpty && m_effectIdle)
         return false;
     return true;
 }
@@ -49,6 +50,10 @@ bool PowerPolicy::shouldRender() const
 int PowerPolicy::frameIntervalMs() const
 {
     if (!shouldRender())
+        return 0;
+    // At rest is NOT the same as nothing to draw. The surface stays up
+    // and the last frame stays on it; we simply stop producing new ones.
+    if (m_effectAtRest)
         return 0;
     return m_onBattery ? kBatteryMs : kActiveMs;
 }

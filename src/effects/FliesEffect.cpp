@@ -1,13 +1,12 @@
-#include "FlyItem.h"
+#include "FliesEffect.h"
 
-#include <QCursor>
 #include <QPainter>
 #include <QPainterPath>
 #include <QQuickWindow>
 #include <QSGGeometryNode>
 #include <QSGTexture>
-#include "FlyMaskMaterial.h"
 #include <QtMath>
+#include "../render/FlyMaskMaterial.h"
 
 namespace hyperbin {
 
@@ -22,13 +21,64 @@ constexpr int kSpritePx = 32;
 // Wing positions in the atlas. Four is enough at this size: a flap is
 // perceived as motion, not as distinct poses.
 constexpr int kFlyFrames = 4;
-// How often to check whether the pointer has left the bin, while the
-// swarm is scattered and nothing is being drawn. 200ms is imperceptible
-// for this and is the only wakeup the app has in that state.
-constexpr int kWatchMs = 200;
 } // namespace
 
-QImage FlyItem::buildSprite(int px)
+FliesEffect::FliesEffect(QObject *parent)
+    : Effect(parent)
+    , m_sprite(buildSprite(kSpritePx))
+{
+}
+
+void FliesEffect::setBinRect(const QRectF &binRect)
+{
+    m_sim.setBinRect(binRect);
+}
+
+void FliesEffect::setSurface(const QVector<quint8> &coverage, int w, int h)
+{
+    m_sim.setSurface(coverage, w, h);
+}
+
+void FliesEffect::setFullness(float fullness)
+{
+    m_sim.setFullness(fullness);
+}
+
+void FliesEffect::setCursor(const QPointF &pos, bool present)
+{
+    m_sim.setCursor(pos, present);
+}
+
+void FliesEffect::step(float dt)
+{
+    m_sim.step(dt);
+
+    // Flies leave rather than settling, so "nothing to draw" is the only
+    // activity change this effect has. An effect that leaves something
+    // behind reports isAtRest() separately — see docs/effects.md.
+    const bool empty = isEmpty();
+    if (empty != m_wasEmpty) {
+        m_wasEmpty = empty;
+        emit activityChanged();
+    }
+}
+
+QMargins FliesEffect::margins(qreal iconSize) const
+{
+    // Asymmetric: flies rise well above the bin but barely stray to
+    // either side, and nothing occluded may pass below it.
+    const int x = FlySim::marginX(iconSize);
+    return QMargins(x, FlySim::marginTop(iconSize),
+                    x, FlySim::marginBottom(iconSize));
+}
+
+void FliesEffect::releaseResources()
+{
+    delete m_texture;
+    m_texture = nullptr;
+}
+
+QImage FliesEffect::buildSprite(int px)
 {
     // A horizontal atlas of kFlyFrames wing positions. The body is
     // identical in every frame; only the wings move.
@@ -139,144 +189,11 @@ QImage FlyItem::buildSprite(int px)
     return img;
 }
 
-FlyItem::FlyItem(QQuickItem *parent)
-    : QQuickItem(parent)
-{
-    m_sprite = buildSprite(kSpritePx);
-    setFlag(ItemHasContents, true);
-    m_clock.setTimerType(Qt::PreciseTimer);
-    connect(&m_clock, &QTimer::timeout, this, &FlyItem::tick);
-    // Coarse on purpose: it exists to notice a pointer leaving, and a
-    // coarse timer can be coalesced with other wakeups by the OS.
-    m_watch.setTimerType(Qt::CoarseTimer);
-    m_watch.setInterval(kWatchMs);
-    connect(&m_watch, &QTimer::timeout, this, &FlyItem::watchTick);
-}
-
-void FlyItem::setFullness(qreal f)
-{
-    if (qFuzzyCompare(m_sim.fullness(), float(f)))
-        return;
-    m_sim.setFullness(float(f));
-    emit fullnessChanged();
-}
-
-void FlyItem::setBinRect(const QRectF &r)
-{
-    if (r == m_binRect)
-        return;
-    m_binRect = r;
-    m_sim.setBinRect(r);
-    emit binRectChanged();
-}
-
-void FlyItem::setBinIcon(const QImage &img)
-{
-    m_binIcon = img;
-    m_binIconDirty = true;
-    rebuildSurface();
-    update();
-}
-
-void FlyItem::rebuildSurface()
-{
-    // Hand the sim the same silhouette the shader clips against.
-    //
-    // These two used to disagree: the sim landed flies anywhere inside
-    // the bin's bounding rect, while maskMode 2 clips a crawling fly to
-    // the artwork's alpha. The trash artwork covers well under half of
-    // its own Dock tile, so most landed flies stood on empty tile and
-    // were erased — the sim reported a crowded bin and the screen showed
-    // an empty one. Coarse on purpose: it is a walkable-surface test, not
-    // a rendering mask, and a fly is bigger than one cell anyway.
-    if (m_binIcon.isNull()) {
-        m_sim.setSurface({}, 0, 0);
-        return;
-    }
-    constexpr int kCov = 24;
-    const QImage src = m_binIcon.scaled(kCov, kCov, Qt::IgnoreAspectRatio,
-                                        Qt::SmoothTransformation)
-                           .convertToFormat(QImage::Format_ARGB32);
-    QVector<quint8> cov(kCov * kCov, 0);
-    for (int y = 0; y < kCov; ++y) {
-        const QRgb *row = reinterpret_cast<const QRgb *>(src.constScanLine(y));
-        for (int x = 0; x < kCov; ++x)
-            // Matches the shader's own cutoff for "the bin is here"
-            // (smoothstep 0.25..0.65 in flymask.frag) closely enough that
-            // a fly is never standing somewhere it gets clipped.
-            cov[y * kCov + x] = qAlpha(row[x]) > 115 ? 1 : 0;
-    }
-    m_sim.setSurface(cov, kCov, kCov);
-}
-
-void FlyItem::setFrameIntervalMs(int ms)
-{
-    if (ms == m_intervalMs)
-        return;
-    m_intervalMs = ms;
-
-    if (ms <= 0) {
-        m_clock.stop();          // no timer, no wakeups, no frames
-    } else {
-        m_clock.setInterval(ms);
-        if (!m_clock.isActive()) {
-            m_dt.restart();
-            m_clock.start();
-        }
-    }
-    emit frameIntervalMsChanged();
-}
-
-void FlyItem::tick()
-{
-    const float dt = m_dt.isValid() ? float(m_dt.restart()) / 1000.0f : 0.05f;
-    // Cursor position is POLLED, not received as an event: the overlay is
-    // click-through by design, so it never gets hover or move events at
-    // all — the Dock beneath it does. One QCursor::pos() per frame is
-    // cheap next to the frame itself.
-    m_sim.setCursor(cursorLocal(), true);
-    m_sim.step(dt);
-    // Scattered: the pointer is on the bin and the last fly has gone.
-    // Rendering can stop completely until it moves away.
-    setScattered(m_sim.cursorOnBin() && m_sim.flies().isEmpty());
-
-    // Tell the owner the moment the last fly leaves, so it can drop the
-    // frame rate to zero and tear down the overlay surface.
-    const bool idle = m_sim.isIdle();
-    if (idle && !m_wasIdle)
-        emit swarmWentIdle();
-    m_wasIdle = idle;
-
-    update(); // the ONLY place a repaint is requested
-}
-
-QPointF FlyItem::cursorLocal() const
-{
-    return mapFromGlobal(QPointF(QCursor::pos()));
-}
-void FlyItem::setScattered(bool s)
-{
-    if (s == m_scattered)
-        return;
-    m_scattered = s;
-    // The watch runs only while scattered. Rendering is stopped in that
-    // state, so this is the only thing left awake — and the moment the
-    // pointer leaves it stops again.
-    if (s)
-        m_watch.start();
-    else
-        m_watch.stop();
-    emit scatteredChanged(s);
-}
-void FlyItem::watchTick()
-{
-    if (!m_binRect.contains(cursorLocal()))
-        setScattered(false);
-}
-QSGNode *FlyItem::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
+QSGNode *FliesEffect::updateNode(QSGNode *old, QQuickWindow *window,
+                                 const QRectF &binRect, QSGTexture *mask)
 {
     const auto &flies = m_sim.flies();
-    if (flies.isEmpty() && m_binIcon.isNull()) {
+    if (flies.isEmpty()) {
         delete old;
         return nullptr;
     }
@@ -293,7 +210,7 @@ QSGNode *FlyItem::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
     auto *root = old;
     if (!root) {
         root = new QSGNode;
-        m_texture = window()->createTextureFromImage(
+        m_texture = window->createTextureFromImage(
             m_sprite, QQuickWindow::TextureHasAlphaChannel);
         for (int pass = 0; pass < 3; ++pass) {
             auto *n = new QSGGeometryNode;
@@ -317,21 +234,17 @@ QSGNode *FlyItem::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
     auto *matBehind  = static_cast<FlyMaskMaterial *>(behind->material());
     auto *matSurface = static_cast<FlyMaskMaterial *>(surface->material());
     auto *matFront   = static_cast<FlyMaskMaterial *>(front->material());
-    if (m_binIconDirty) {
-        m_binIconDirty = false;
-        delete m_maskTexture;
-        m_maskTexture = m_binIcon.isNull()
-            ? nullptr
-            : window()->createTextureFromImage(m_binIcon,
-                                               QQuickWindow::TextureHasAlphaChannel);
-        matBehind->mask = m_maskTexture;
-        matSurface->mask = m_maskTexture;
-    }
+    // The mask texture belongs to the host — it is built from the bin
+    // icon, which every effect needs and none of them owns. Assigning it
+    // every frame is free; the material's compare() decides whether
+    // anything actually has to be re-uploaded.
+    matBehind->mask  = mask;
+    matSurface->mask = mask;
     const bool dbg = qEnvironmentVariableIsSet("HYPERBIN_SHOW_BINRECT");
-    matBehind->binRect = m_binRect;
+    matBehind->binRect = binRect;
     matBehind->debugRect = dbg;
     matBehind->maskMode = 1;           // hidden where the bin is
-    matSurface->binRect = m_binRect;
+    matSurface->binRect = binRect;
     matSurface->debugRect = false;
     matSurface->maskMode = 2;          // clipped TO the bin
     matFront->mask = nullptr;          // front flies are never occluded
@@ -345,7 +258,7 @@ QSGNode *FlyItem::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
     // --- calibration ------------------------------------------------------
     // MUST come after the mask texture is (re)created below-of-here in
     // program order: running it first meant these materials captured a
-    // pointer to m_maskTexture that the mask update then deleted, and
+    // pointer to mask that the mask update then deleted, and
     // the next frame drew from freed memory (SIGSEGV).
     // HYPERBIN_CALIBRATE=x|y draws the mask silhouette at five candidate
     // offsets at once, each a different colour, so which one fits is a
@@ -358,7 +271,7 @@ QSGNode *FlyItem::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
     // folder above because the trash itself is semi-transparent. An eye
     // has none of those failure modes.
     const QByteArray calAxis = qgetenv("HYPERBIN_CALIBRATE");
-    if (!calAxis.isEmpty() && !m_binRect.isEmpty()) {
+    if (!calAxis.isEmpty() && !binRect.isEmpty()) {
         // Range comes from HYPERBIN_CALIBRATE=x8 / y6 etc; the first
         // sweep sat entirely off the bin, so a fixed +/-4 was useless.
         // Sweep scales with the icon by default: a fixed span in points
@@ -368,7 +281,7 @@ QSGNode *FlyItem::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
         // scale with the icon.
         float span = calAxis.startsWith('s')
             ? 8.0f
-            : 0.11f * float(qMin(m_binRect.width(), m_binRect.height()));
+            : 0.11f * float(qMin(binRect.width(), binRect.height()));
         {
             const QByteArray n = calAxis.mid(1);
             if (!n.isEmpty() && n.toFloat() > 0) span = n.toFloat();
@@ -393,7 +306,7 @@ QSGNode *FlyItem::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
             qInfo("calibrate %s over icon %.0fx%.0f: red=%+.1f%s orange=%+.1f%s "
                   "green=0 blue=%+.1f%s violet=%+.1f%s",
                   sAxis ? "scale" : (xAxis ? "dx" : "dy"),
-                  m_binRect.width(), m_binRect.height(),
+                  binRect.width(), binRect.height(),
                   -span, unit, -span*0.5f, unit, span*0.5f, unit, span, unit); }
         while (root->childCount() < 3 + 5) {
             auto *n = new QSGGeometryNode;
@@ -414,14 +327,14 @@ QSGNode *FlyItem::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
             if (sAxis) {
                 // kCand is a percentage here, not points.
                 const qreal f2 = 1.0 + kCand[ci] / 100.0;
-                const QPointF ctr = m_binRect.center();
-                r = QRectF(0, 0, m_binRect.width() * f2, m_binRect.height() * f2);
+                const QPointF ctr = binRect.center();
+                r = QRectF(0, 0, binRect.width() * f2, binRect.height() * f2);
                 r.moveCenter(ctr);
             } else {
-                r = m_binRect.translated(xAxis ? kCand[ci] : 0.0,
+                r = binRect.translated(xAxis ? kCand[ci] : 0.0,
                                          xAxis ? 0.0 : kCand[ci]);
             }
-            m2->mask = m_maskTexture;
+            m2->mask = mask;
             m2->binRect = r;
             m2->debugRect = true;
             memcpy(m2->debugRGBA, kCols[ci], sizeof(kCols[ci]));
@@ -441,7 +354,7 @@ QSGNode *FlyItem::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
     // HYPERBIN_SHOW_BINRECT draws one extra quad over binRect so the mask
     // region is directly visible on screen. Inferring its position from
     // screenshots proved unreliable; this shows it.
-    const bool showRect = dbg && !m_binRect.isEmpty();
+    const bool showRect = dbg && !binRect.isEmpty();
 
     int nBehind = showRect ? 1 : 0, nSurface = 0, nFront = 0;
     for (const Fly &f : flies) {
@@ -462,8 +375,8 @@ QSGNode *FlyItem::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
 
     int i = 0, js = 0, jf = 0;
     if (showRect) {
-        const float l = float(m_binRect.left()),  t = float(m_binRect.top());
-        const float r = float(m_binRect.right()), b = float(m_binRect.bottom());
+        const float l = float(binRect.left()),  t = float(binRect.top());
+        const float r = float(binRect.right()), b = float(binRect.bottom());
         vb[i++].set(l, t, 0, 0); vb[i++].set(r, t, 1, 0); vb[i++].set(r, b, 1, 1);
         vb[i++].set(l, t, 0, 0); vb[i++].set(r, b, 1, 1); vb[i++].set(l, b, 0, 1);
     }

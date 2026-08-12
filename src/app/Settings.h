@@ -23,12 +23,6 @@ public:
     /// Delete everything in this store. Tests only.
     void clearStore() { m_store.clear(); }
 
-    /// The animation shown over the bin. Only one for now; the enum
-    /// exists so adding a second doesn't mean reworking storage.
-    enum class Type {
-        Flies = 0,
-    };
-    Q_ENUM(Type)
 
     /// How many flies, independent of what's actually in the bin. The
     /// three fixed steps are thirds, so they line up with the relative
@@ -51,12 +45,17 @@ public:
     Q_ENUM(Threshold)
 
     bool      enabled() const   { return m_enabled; }
-    Type      type() const      { return m_type; }
+    /// Which effect is running, by id — an opaque string, not an enum
+    /// ordinal: ordinals silently change meaning when the list is
+    /// reordered, and this list is expected to grow. Empty means "not
+    /// chosen"; EffectRegistry resolves that to its default. Settings
+    /// knows nothing about which effects exist, on purpose.
+    QString   infestation() const { return m_infestation; }
     Density   density() const   { return m_density; }
     Threshold threshold() const { return m_threshold; }
 
     void setEnabled(bool on);
-    void setType(Type t);
+    void setInfestation(const QString &id);
     void setDensity(Density d);
     void setThreshold(Threshold t);
 
@@ -70,13 +69,14 @@ public:
 
 signals:
     void enabledChanged(bool on);
+    void infestationChanged(const QString &id);
     /// Anything that changes how the swarm should look.
     void appearanceChanged();
 
 private:
     QSettings m_store;
     bool      m_enabled;
-    Type      m_type;
+    QString   m_infestation;
     Density   m_density;
     Threshold m_threshold;
 };

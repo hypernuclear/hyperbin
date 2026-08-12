@@ -2,7 +2,7 @@
 #include "app/TrayMenu.h"
 #include "core/PowerPolicy.h"
 #include "platform/TrashTarget.h"
-#include "render/FlyItem.h"
+#include "render/EffectItem.h"
 
 #include <QApplication>
 #include <QLocale>
@@ -51,8 +51,8 @@ int main(int argc, char **argv)
         return -1;
 
     auto *win = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
-    auto *fly = win ? win->findChild<FlyItem *>(QStringLiteral("flies")) : nullptr;
-    if (!fly)
+    auto *fx = win ? win->findChild<EffectItem *>(QStringLiteral("effect")) : nullptr;
+    if (!fx)
         return -1;
 
     // Windowed dev mode is a manual sim playground: the slider owns
@@ -115,7 +115,7 @@ int main(int argc, char **argv)
     // the first transition — the app began life tracking the Dock at
     // frame rate no matter what state it was really in.
     auto applyPower = [&] {
-        fly->setFrameIntervalMs(power.frameIntervalMs());
+        fx->setFrameIntervalMs(power.frameIntervalMs());
         // Stop tracking the Dock at frame rate when nothing is drawn.
         // This is the difference between "not rendering" and "not costing
         // anything": the AX poll ran at 60Hz whatever the swarm was doing,
@@ -131,51 +131,64 @@ int main(int argc, char **argv)
         setAnimationActivity(power.shouldRender());
 #endif
     };
-    QObject::connect(&power, &PowerPolicy::changed, fly, applyPower);
-    QObject::connect(fly, &FlyItem::swarmWentIdle, &power,
-                     [&] { power.setSwarmIdle(true); });
+    QObject::connect(&power, &PowerPolicy::changed, fx, applyPower);
+    QObject::connect(fx, &EffectItem::becameEmpty, &power,
+                     [&] { power.setEffectIdle(true); });
 
     // Fullness comes from the SETTINGS, not straight from the bin: the
     // three fixed densities deliberately ignore what's actually in there,
     // and only the relative mode looks at the trash at all.
     auto applyDensity = [&] {
         const int n = target->itemCount();
-        fly->setFullness(n == 0 ? 0.0
+        fx->setFullness(n == 0 ? 0.0
                                 : settings.fullnessFor(target->byteSize(), n));
     };
-    QObject::connect(&settings, &Settings::appearanceChanged, fly, applyDensity);
-    QObject::connect(target.get(), &TrashTarget::byteSizeChanged, fly,
+    QObject::connect(&settings, &Settings::appearanceChanged, fx, applyDensity);
+    QObject::connect(&settings, &Settings::infestationChanged, fx,
+                     [&](const QString &id) {
+        fx->setEffectId(id);
+        // A new effect wants its own room around the icon; re-apply the
+        // geometry rather than leaving it sized for the old one.
+        const QRect ir = target->iconRect();
+        if (!ir.isEmpty())
+            emit target->iconRectChanged(ir);
+    });
+    fx->setEffectId(settings.infestation());
+    QObject::connect(target.get(), &TrashTarget::byteSizeChanged, fx,
                      [&](qint64) { applyDensity(); });
 
-    // Pointer on the bin: the swarm scatters, then rendering stops dead
-    // until it leaves. FlyItem keeps one coarse timer alive to notice.
-    QObject::connect(fly, &FlyItem::scatteredChanged, &power,
-                     [&](bool s) { power.setScattered(s); });
+    // Pointer on the bin: the effect reacts — the swarm scatters — and
+    // then rendering stops dead until it leaves. EffectItem keeps one
+    // coarse timer alive to notice.
+    QObject::connect(fx, &EffectItem::dismissedChanged, &power,
+                     [&](bool s) { power.setDismissed(s); });
 
-    QObject::connect(target.get(), &TrashTarget::itemCountChanged, fly, [&](int n) {
+    QObject::connect(target.get(), &TrashTarget::itemCountChanged, fx, [&](int n) {
         applyDensity();
         power.setBinEmpty(n == 0);
         // Full and empty are different artwork; refresh when it flips.
         const QRect ir = target->iconRect();
         if (!ir.isEmpty())
-            fly->setBinIcon(target->iconImage(int(qMax(ir.width(), ir.height()) * 2)));
+            fx->setBinIcon(target->iconImage(int(qMax(ir.width(), ir.height()) * 2)));
         if (n > 0)
-            power.setSwarmIdle(false);
+            power.setEffectIdle(false);
     });
-    QObject::connect(target.get(), &TrashTarget::iconRectChanged, fly,
+    QObject::connect(target.get(), &TrashTarget::iconRectChanged, fx,
                      [&](const QRect &r) {
         if (!win || windowed)
             return;
         // Overlay = icon plus flight margin, scaled with the icon so a
         // magnified Dock tile doesn't clip the swarm. Asymmetric: flies
         // rise well above the bin but barely stray to either side.
-        const qreal d  = qMax(r.width(), r.height());
-        const int mx   = FlySim::marginX(d);
-        const int mtop = FlySim::marginTop(d);
-        const int mbot = FlySim::marginBottom(d);
-        win->setGeometry(r.adjusted(-mx, -mtop, mx, mbot));
-        fly->setBinRect(QRectF(mx, mtop, r.width(), r.height()));
-        fly->setSize(QSizeF(win->width(), win->height()));
+        // Room comes from the EFFECT, not from the fly simulation: each
+        // one needs a different shape of space around the icon, and an
+        // overlay sized for the wrong one clips at the window edge.
+        const qreal d      = qMax(r.width(), r.height());
+        const QMargins mgn = fx->margins(d);
+        win->setGeometry(r.adjusted(-mgn.left(), -mgn.top(),
+                                    mgn.right(), mgn.bottom()));
+        fx->setBinRect(QRectF(mgn.left(), mgn.top(), r.width(), r.height()));
+        fx->setSize(QSizeF(win->width(), win->height()));
 #if defined(Q_OS_WIN)
         // Test occlusion at the bin itself, not at the overlay's corner:
         // the margins reach well above the icon, and a window covering
@@ -187,7 +200,7 @@ int main(int argc, char **argv)
         // composited over the swarm. This only works because iconRect()
         // now reports the artwork's true bounds rather than the
         // Accessibility hit area — see visualIconRect().
-        fly->setBinIcon(target->iconImage(int(qMax(r.width(), r.height()) * 2)));
+        fx->setBinIcon(target->iconImage(int(qMax(r.width(), r.height()) * 2)));
     });
 
     // HYPERBIN_DEBUG=1 reports where the overlay thinks it is. Kept because
@@ -205,7 +218,7 @@ int main(int argc, char **argv)
                   win->isVisible(), g.x(), g.y(), g.width(), g.height(),
                   ir.x(), ir.y(), ir.width(), ir.height(),
                   win->screen() ? qPrintable(win->screen()->name()) : "none",
-                  fly->fullness(), fly->frameIntervalMs(), power.shouldRender());
+                  fx->fullness(), fx->frameIntervalMs(), power.shouldRender());
         });
         dbg->start();
     }
@@ -304,9 +317,9 @@ int main(int argc, char **argv)
     // on the Dock for the length of a powermetrics run.
     if (qEnvironmentVariableIntValue("HYPERBIN_FORCE_SCATTER") == 1) {
         qInfo("hyperbin: forced into the scattered state for measurement");
-        power.setScattered(true);
+        power.setDismissed(true);
     }
-    power.setSwarmIdle(true);
+    power.setEffectIdle(true);
     applyEnabled(settings.enabled());
     applyPower();
 

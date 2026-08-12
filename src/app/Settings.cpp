@@ -1,6 +1,7 @@
 #include "Settings.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace hyperbin {
 
@@ -9,7 +10,7 @@ constexpr qint64 kMB = 1024LL * 1024LL;
 constexpr qint64 kGB = 1024LL * kMB;
 
 template <typename E>
-E readEnum(const QSettings &s, const char *key, E def, int maxValue)
+[[maybe_unused]] E readEnum(const QSettings &s, const char *key, E def, int maxValue)
 {
     const int v = s.value(QString::fromLatin1(key), int(def)).toInt();
     return (v >= 0 && v <= maxValue) ? E(v) : def;
@@ -21,12 +22,32 @@ Settings::Settings(QObject *parent, const QString &appName)
     , m_store(QStringLiteral("Hypernuclear"), appName)
 {
     m_enabled   = m_store.value(QStringLiteral("enabled"), true).toBool();
-    m_type      = readEnum(m_store, "type", Type::Flies, 0);
+    // Migration: the first build stored an enum ordinal under "type", and
+    // only one value was ever written. Drop it; an unset infestation means
+    // "whatever the registry considers default", which is the same thing.
+    m_store.remove(QStringLiteral("type"));
+    // Amount and threshold were briefly namespaced under the effect. They
+    // describe how much of WHATEVER is running, so they moved up a level;
+    // carry the old values across rather than resetting people.
+    for (const auto &pair : {std::pair{"flies/density", "density"},
+                             std::pair{"flies/threshold", "threshold"}}) {
+        const QString from = QString::fromLatin1(pair.first);
+        const QString to   = QString::fromLatin1(pair.second);
+        if (m_store.contains(from) && !m_store.contains(to))
+            m_store.setValue(to, m_store.value(from));
+        m_store.remove(from);
+    }
+    // Stored as an opaque id. Settings deliberately does NOT know which
+    // effects exist — that list lives in EffectRegistry, which pulls in
+    // the renderer, and dragging that into a value store would drag it
+    // into the headless tests too. An unknown or empty id is resolved by
+    // the registry at construction time.
+    m_infestation = m_store.value(QStringLiteral("infestation")).toString();
     // Relative by default: tying the swarm to how much rubbish is
     // actually there is the whole idea, and the fixed steps are for
     // people who want it to stop being clever.
-    m_density   = readEnum(m_store, "flies/density", Density::Relative, 3);
-    m_threshold = readEnum(m_store, "flies/threshold", Threshold::HundredMB, 3);
+    m_density   = readEnum(m_store, "density", Density::Relative, 3);
+    m_threshold = readEnum(m_store, "threshold", Threshold::HundredMB, 3);
 }
 
 void Settings::setEnabled(bool on)
@@ -38,12 +59,13 @@ void Settings::setEnabled(bool on)
     emit enabledChanged(on);
 }
 
-void Settings::setType(Type t)
+void Settings::setInfestation(const QString &id)
 {
-    if (t == m_type)
+    if (id == m_infestation || id.isEmpty())
         return;
-    m_type = t;
-    m_store.setValue(QStringLiteral("type"), int(t));
+    m_infestation = id;
+    m_store.setValue(QStringLiteral("infestation"), id);
+    emit infestationChanged(id);
     emit appearanceChanged();
 }
 
@@ -52,7 +74,7 @@ void Settings::setDensity(Density d)
     if (d == m_density)
         return;
     m_density = d;
-    m_store.setValue(QStringLiteral("flies/density"), int(d));
+    m_store.setValue(QStringLiteral("density"), int(d));
     emit appearanceChanged();
 }
 
@@ -61,7 +83,7 @@ void Settings::setThreshold(Threshold t)
     if (t == m_threshold)
         return;
     m_threshold = t;
-    m_store.setValue(QStringLiteral("flies/threshold"), int(t));
+    m_store.setValue(QStringLiteral("threshold"), int(t));
     emit appearanceChanged();
 }
 

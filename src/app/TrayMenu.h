@@ -61,7 +61,7 @@ private:
     QAction      *m_login     = nullptr;
     QAction      *m_status    = nullptr;
     QAction      *m_problem   = nullptr;
-    QActionGroup *m_typeGroup = nullptr;
+    QActionGroup *m_effectGroup = nullptr;
     QActionGroup *m_densityGroup   = nullptr;
     QActionGroup *m_thresholdGroup = nullptr;
 };

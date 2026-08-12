@@ -17,7 +17,12 @@ public:
 
     // Inputs — each setter is cheap and idempotent.
     void setBinEmpty(bool empty);
-    void setSwarmIdle(bool idle);      // flies fully dispersed
+    /// Nothing is drawn — the overlay surface can go away.
+    void setEffectIdle(bool idle);
+    /// Something IS drawn but will not change: keep the frame on screen,
+    /// stop the clock. An ooze puddle that has settled costs nothing to
+    /// leave there and a full frame rate to redraw.
+    void setEffectAtRest(bool atRest);
     void setTargetVisible(bool vis);   // not occluded / not hidden
     void setDisplayAwake(bool awake);  // display on, session unlocked
     void setOnBattery(bool battery);
@@ -26,9 +31,9 @@ public:
     /// overlay surface and no trash polling — the app is resident but
     /// does nothing at all until it's switched back on.
     void setEnabled(bool on);
-    /// The pointer is on the bin: the swarm has scattered and there is
-    /// nothing left to animate until it moves away.
-    void setScattered(bool scattered);
+    /// The pointer is on the bin and the effect has finished reacting to
+    /// it — nothing left to animate until it moves away.
+    void setDismissed(bool dismissed);
     bool enabled() const { return m_enabled; }
 
     /// 0 means "don't render at all" — the caller stops its timer and
@@ -43,13 +48,18 @@ private:
     void bump();
 
     bool m_binEmpty      = true;
-    bool m_swarmIdle     = true;
+    bool m_effectIdle    = true;
+    // Starts FALSE, unlike the other flags. Rest is a state an effect
+    // has to run in order to reach; defaulting to true deadlocks — the
+    // clock is stopped because we think it is at rest, and it can never
+    // report otherwise because it never gets a step.
+    bool m_effectAtRest  = false;
     bool m_targetVisible = true;
     bool m_displayAwake  = true;
     bool m_onBattery     = false;
     bool m_lowPower      = false;
     bool m_enabled       = true;
-    bool m_scattered     = false;
+    bool m_dismissed     = false;
     bool m_lastRender    = false;
     int  m_lastInterval  = 0;
 };

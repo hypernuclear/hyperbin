@@ -1,5 +1,6 @@
 #include "TrayMenu.h"
 
+#include "../core/EffectRegistry.h"
 #include "../platform/LaunchAtLogin.h"
 #include "Settings.h"
 
@@ -192,34 +193,38 @@ void TrayMenu::build()
     m_enable->setCheckable(true);
     connect(m_enable, &QAction::toggled, m_settings, &Settings::setEnabled);
 
-    // --- type ---------------------------------------------------------
-    // One entry today. It exists as a submenu now so that adding a second
-    // animation is a new action rather than a new menu structure — and so
-    // the settings below it are visibly scoped to the chosen type.
-    QMenu *type = m_menu->addMenu(QStringLiteral("Type"));
-    m_typeGroup = new QActionGroup(this);
-    m_typeGroup->setExclusive(true);
-    auto *flies = type->addAction(QStringLiteral("Flies"));
-    flies->setCheckable(true);
-    flies->setData(int(Settings::Type::Flies));
-    m_typeGroup->addAction(flies);
-    connect(m_typeGroup, &QActionGroup::triggered, this, [this](QAction *a) {
-        m_settings->setType(Settings::Type(a->data().toInt()));
+    // --- effect ---------------------------------------------------------
+    // Built from the effect registry rather than hard-coded, so adding an
+    // effect is one entry in EffectRegistry.cpp and nothing here.
+    QMenu *effectMenu = m_menu->addMenu(QStringLiteral("Effect"));
+    m_effectGroup = new QActionGroup(this);
+    m_effectGroup->setExclusive(true);
+    for (const EffectInfo &e : effects::all()) {
+        auto *a = effectMenu->addAction(e.label);
+        a->setCheckable(true);
+        a->setData(e.id);
+        m_effectGroup->addAction(a);
+    }
+    connect(m_effectGroup, &QActionGroup::triggered, this, [this](QAction *a) {
+        m_settings->setInfestation(a->data().toString());
     });
 
-    // --- settings for the selected type -------------------------------
-    QMenu *fly = m_menu->addMenu(QStringLiteral("Flies"));
+    // --- amount ---------------------------------------------------------
+    // How much of whatever effect is running. Generic on purpose: every
+    // effect scales with the trash, so this is a sibling of the chooser
+    // rather than something nested inside each effect's own settings.
+    QMenu *amount = m_menu->addMenu(QStringLiteral("Amount"));
 
     m_densityGroup = new QActionGroup(this);
     m_densityGroup->setExclusive(true);
     const struct { const char *label; Settings::Density d; } densities[] = {
-        {"A Few Flies",              Settings::Density::Few},
-        {"Lots of Flies",            Settings::Density::Lots},
-        {"Too Many Flies!",          Settings::Density::TooMany},
-        {"Flies Relative to Trash Size", Settings::Density::Relative},
+        {"Just a Little",         Settings::Density::Few},
+        {"Make It Stop",          Settings::Density::Lots},
+        {"Oh the Horror!",        Settings::Density::TooMany},
+        {"More Trash, More Effect", Settings::Density::Relative},
     };
     for (const auto &e : densities) {
-        auto *a = fly->addAction(QString::fromLatin1(e.label));
+        auto *a = amount->addAction(QString::fromLatin1(e.label));
         a->setCheckable(true);
         a->setData(int(e.d));
         m_densityGroup->addAction(a);
@@ -228,8 +233,8 @@ void TrayMenu::build()
         m_settings->setDensity(Settings::Density(a->data().toInt()));
     });
 
-    fly->addSeparator();
-    QMenu *thresh = fly->addMenu(QStringLiteral("Trash Threshold"));
+    amount->addSeparator();
+    QMenu *thresh = amount->addMenu(QStringLiteral("Trash Threshold"));
     m_thresholdGroup = new QActionGroup(this);
     m_thresholdGroup->setExclusive(true);
     const struct { const char *label; Settings::Threshold t; } thresholds[] = {
@@ -282,14 +287,15 @@ void TrayMenu::syncFromSettings()
         for (QAction *a : g->actions())
             a->setChecked(a->data().toInt() == value);
     };
-    check(m_typeGroup, int(m_settings->type()));
+    for (QAction *a : m_effectGroup->actions())
+        a->setChecked(a->data().toString() == m_settings->infestation());
     check(m_densityGroup, int(m_settings->density()));
     check(m_thresholdGroup, int(m_settings->threshold()));
 
     // The threshold only means anything in Relative mode, and greying it
     // out says so more clearly than a tooltip would.
     for (QAction *a : m_menu->actions()) {
-        if (a->menu() && a->text() == QStringLiteral("Flies")) {
+        if (a->menu() && a->text() == QStringLiteral("Amount")) {
             for (QAction *sub : a->menu()->actions())
                 if (sub->menu())
                     sub->setEnabled(m_settings->density()

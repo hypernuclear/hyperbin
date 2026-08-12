@@ -113,8 +113,13 @@ qt_add_executable(hyperbin
     $<$<PLATFORM_ID:Windows>:src/platform/WinOverlay.h>
     $<$<PLATFORM_ID:Windows>:src/platform/WinScreen.cpp>
     $<$<PLATFORM_ID:Windows>:src/platform/WinScreen.h>
-    src/render/FlyItem.cpp
-    src/render/FlyItem.h
+    src/core/Effect.h
+    src/core/EffectRegistry.cpp
+    src/core/EffectRegistry.h
+    src/effects/FliesEffect.cpp
+    src/effects/FliesEffect.h
+    src/render/EffectItem.cpp
+    src/render/EffectItem.h
     src/render/FlyMaskMaterial.cpp
     src/render/FlyMaskMaterial.h
 )
@@ -139,6 +144,7 @@ target_include_directories(hyperbin PRIVATE
     src
     src/app
     src/core
+    src/effects
     src/render
     src/platform
 )

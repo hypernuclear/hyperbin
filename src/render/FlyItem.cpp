@@ -435,18 +435,19 @@ QSGNode *FlyItem::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
         // reads as it changing size for no reason — there's nothing in
         // the scene to interpret it as distance — and at ~2pt the pop it
         // was hiding isn't visible anyway.
-        // Render scale is NOT the sim's scale below a 40pt tile. Motion
-        // must stay proportional — a fly crossing a small bin has to
-        // cross a small distance — but the sprite is only ~2pt across at
-        // k=1, so at a 16pt Dock tile (k=0.4) it lands under a pixel and
-        // disappears. The floor lifts small sizes only: at k>=1 this is
-        // exactly k, so the large sizes that already look right are
-        // untouched.
-        const float k  = m_sim.sizeScale();
-        const float rk = qMax(k, 0.72f + 0.28f * k);
+        // Render scale is NOT the sim's scale: motion stays proportional
+        // to the icon, the drawn fly does not. See FlySim::renderScale()
+        // for why it is floored at the bottom and compressed at the top —
+        // and note it lives there, next to the margins that must leave
+        // room for it, rather than as a constant duplicated here.
+        // To make flies bigger, edit FlySim::kFlyLengthAt40 — it is stated
+        // in visible points, which this quad is not.
+        const float rk   = float(FlySim::renderScale(
+            qMax(m_sim.binRect().width(), m_sim.binRect().height())));
+        const float base = float(FlySim::spriteBase());
         const float fade = 1.0f;
-        const float hw   = 2.05f * f.scale * rk * fade;
-        const float hh   = 2.05f * f.scale * beat * rk * fade;
+        const float hw   = base * f.scale * rk * fade;
+        const float hh   = base * f.scale * beat * rk * fade;
         const float x    = float(f.pos.x());
         const float y    = float(f.pos.y());
 

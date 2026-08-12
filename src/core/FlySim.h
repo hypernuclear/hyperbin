@@ -23,6 +23,7 @@
 #include <QRectF>
 #include <QSizeF>
 #include <QVector>
+#include <cmath>
 #include <cstdint>
 
 namespace hyperbin {
@@ -175,12 +176,62 @@ public:
         return int(qMax(24.0, 0.62 * iconSize + spriteAllowance(iconSize)));
     }
 
-    /// Half-size of the drawn fly at this icon size. Kept in step with
-    /// FlyItem's quad size by hand — the renderer owns the constant, the
-    /// margins only need to leave room for it.
+    /// How much bigger the DRAWN fly gets as the icon grows.
+    ///
+    /// Deliberately not proportional at either end, and this is a
+    /// different question from how far a fly travels — motion has to stay
+    /// proportional (a fly crossing a small bin crosses a small distance),
+    /// but a sprite that shrinks with it stops reading as a fly.
+    ///
+    /// Below the reference tile: a floor. The sprite is only ~2pt across
+    /// at k=1, so a 16pt Dock tile (k=0.4) would put it under a pixel.
+    ///
+    /// Above it: a 0.75 power rather than k. Proportional growth pinned
+    /// the fly at a flat 10% of the icon at every size above 40pt, which
+    /// is too small to read at rest and no larger, relatively, when the
+    /// Dock magnifies. Compressing the top end lets the base constant come
+    /// up — making flies bigger where they are actually looked at —
+    /// without a magnified tile getting cartoon flies.
+    static qreal renderScale(qreal iconSize)
+    {
+        const qreal k = iconSize > 1.0 ? iconSize / 40.0 : 1.0;
+        return qMax(std::pow(k, 0.75), 0.72 + 0.28 * k);
+    }
+
+    // ---- THE FLY SIZE DIAL ------------------------------------------
+    /// Visible length of a fly at the 40pt reference tile, in points.
+    /// **This is the number to edit.**
+    ///
+    /// Stated as what you SEE, because the quad is not what you see: the
+    /// sprite's dark body+head spans only ~58% of its texture cell, the
+    /// rest being swept-back wings, a drop shadow and transparent margin.
+    /// So the old half-size constant of 2.05 drew a 4.1pt quad containing
+    /// a 2.4pt fly — which is why "make it 15% bigger" did nothing
+    /// visible, and why tuning the quad size directly feels unresponsive.
+    ///
+    ///   value   fly at a 40pt tile   fly on a 48pt Recycle Bin
+    ///     2.4    (the old size)      2.8pt   — a speck
+    ///     7.0    7pt                 8pt     — reads as an insect
+    ///    10.0    10pt                11.5pt  — unmissable, cartoonish
+    ///
+    /// HYPERBIN_FLY_SIZE multiplies this at runtime for quick A/B, but
+    /// editing here is the intended way to settle it.
+    static constexpr qreal kFlyLengthAt40 = 4.0;
+
+    /// Half-size of the drawn QUAD at the reference tile, before the
+    /// per-fly 0.8–1.2 variation. Derived from kFlyLengthAt40 — tune that.
+    static qreal spriteBase();
+
+    /// Half-size of the drawn fly at this icon size — the bound the
+    /// margins have to leave room for.
+    ///
+    /// Derived from the same two functions the renderer draws with rather
+    /// than a hand-copied constant. They used to be independent numbers
+    /// "kept in step by hand", which is a clipped swarm waiting to happen
+    /// the first time only one of them is retuned.
     static qreal spriteAllowance(qreal iconSize)
     {
-        return 2.05 * 1.2 * qMax(1.0, iconSize / 40.0) + 2.0;
+        return spriteBase() * 1.2 * renderScale(iconSize) + 2.0;
     }
 
     /// Icon size relative to the 40pt Dock tile the tunables were set

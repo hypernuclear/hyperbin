@@ -1,10 +1,41 @@
 #include "FlySim.h"
 
+#include <QtEnvironmentVariables>
 #include <QtMath>
 #include <algorithm>
 #include <cmath>
 
 namespace hyperbin {
+
+qreal FlySim::spriteBase()
+{
+    // Visible length -> quad half-size. The sprite's dark body+head spans
+    // ~58% of the texture cell (body ellipse 0.52 of it, head reaching a
+    // little further forward), so a quad of width W shows a fly of about
+    // 0.58 W. Halved again because this returns a HALF-size.
+    constexpr qreal kInkFraction = 0.58;
+
+    static const qreal base = [] {
+        qreal gain = 1.0;
+        if (qEnvironmentVariableIsSet("HYPERBIN_FLY_SIZE")) {
+            bool ok = false;
+            const qreal v = qEnvironmentVariable("HYPERBIN_FLY_SIZE").toDouble(&ok);
+            // Reject rather than clamp. Clamping quietly turned "225%" —
+            // which does not parse as a number — into 0.1, i.e. flies ten
+            // times SMALLER than default, while looking like the knob had
+            // been set. A knob that silently does the opposite of what was
+            // asked is worse than no knob.
+            if (ok && v > 0.0)
+                gain = v;
+            else
+                qWarning("hyperbin: HYPERBIN_FLY_SIZE='%s' is not a positive "
+                         "number (try 1.5, not 150%%); ignoring it",
+                         qPrintable(qEnvironmentVariable("HYPERBIN_FLY_SIZE")));
+        }
+        return kFlyLengthAt40 * gain / (2.0 * kInkFraction);
+    }();
+    return base;
+}
 
 namespace {
 // Clamp a vector's length without a sqrt when it's already short enough.

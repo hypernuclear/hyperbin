@@ -93,6 +93,12 @@ void FlySim::setBinRect(const QRectF &r)
     m_bin = r;
 }
 
+void FlySim::setCursor(const QPointF &p, bool present)
+{
+    m_cursor        = p;
+    m_cursorPresent = present;
+}
+
 void FlySim::setFullness(float f)
 {
     m_fullnessTarget = std::clamp(f, 0.0f, 1.0f);
@@ -196,6 +202,39 @@ void FlySim::step(float dt)
     m_fullness += (m_fullnessTarget - m_fullness)
                   * std::min(1.0f, params.easeRate * dt);
 
+    // Pointer on the bin: the swarm clears off and does not come back
+    // until it leaves. Scattering alone wasn't enough — flies would circle
+    // just outside the cursor and crowd straight back in.
+    m_cursorOnBin = m_cursorPresent && !m_bin.isEmpty()
+                    && m_bin.contains(m_cursor);
+    if (m_cursorOnBin) {
+        const float ks = sizeScale();
+        for (Fly &f : m_flies) {
+            if (f.leaving || f.scatterLeft > 0.0f)
+                continue;
+            // Scatter FIRST, fade second. Marking them leaving on the spot
+            // made them dissolve where they sat, which looked like the
+            // pointer killing flies instead of scaring them off. They get
+            // a burst away from the cursor, and only once that has played
+            // out are they allowed to start fading.
+            f.freezeLeft  = 0.0f;   // a startled fly unfreezes and goes
+            f.seekingLand = false;
+            f.scatterLeft = rndRange(params.scatterMin, params.scatterMax);
+            enterMode(f, FlyMode::Flying);
+            QPointF away = f.pos - m_cursor;
+            const float ad = float(std::hypot(away.x(), away.y()));
+            away = ad > 0.001f ? away / ad
+                               : QPointF(std::cos(f.wanderAngle),
+                                         std::sin(f.wanderAngle));
+            away.ry() -= 0.55f;     // bias up and out, away from the Dock
+            const float al = float(std::hypot(away.x(), away.y()));
+            if (al > 0.001f) away /= al;
+            f.dir      = away;
+            f.vel      = away * params.flySpeed * ks * params.scatterSpeed;
+            f.bolting  = true;
+            f.boltLeft = params.boltFor;
+        }
+    }
     const int want = desiredCount();
 
     // Count only the flies that are staying — a departing one has already
@@ -208,7 +247,7 @@ void FlySim::step(float dt)
     // Cap on the TOTAL list, not just the ones staying: a departing fly
     // is still on screen, and counting only 'staying' let the visible
     // count overshoot maxFlies while replacements overlapped leavers.
-    if (staying < want && m_flies.size() < params.maxFlies)
+    if (!m_cursorOnBin && staying < want && m_flies.size() < params.maxFlies)
         spawnFly();
 
     // Everything spatial scales off the icon, so Dock magnification and
@@ -226,6 +265,11 @@ void FlySim::step(float dt)
         Fly &f = m_flies[i];
 
         // --- lifecycle -------------------------------------------------
+        if (f.scatterLeft > 0.0f) {
+            f.scatterLeft -= dt;
+            if (f.scatterLeft <= 0.0f)
+                f.leaving = true;
+        }
         if (!f.leaving) {
             f.life -= dt;
             // Fading out on top of the bin looks like a fly winking out of
@@ -326,10 +370,12 @@ void FlySim::step(float dt)
                 f.seekingLand = false;
                 f.dir         = out;
                 f.vel         = out * params.flySpeed * k * params.boltSpeed;
-                // It doesn't come back. Departing is the point of the
-                // manoeuvre, and a fly that bolted and then resumed
-                // pottering about would undo it.
-                f.life        = std::min(f.life, params.boltFor);
+                // The burst is a burst, not a death sentence. Clamping the
+                // fly's life here meant it bolted and then immediately
+                // faded out, so the sequence read as pause-then-vanish
+                // rather than pause-then-fly-away. It now rejoins normal
+                // flight and leaves when its time is up like any other.
+                f.boltLeft    = params.boltFor;
             }
         }
         // Crawling pace wanders, and spends real time near a standstill.
@@ -357,8 +403,17 @@ void FlySim::step(float dt)
         // A bolting fly keeps its speed up. Without this the very next
         // frame clamps it back to the normal cruise limit and the burst
         // never actually happens.
-        if (f.bolting && !frozen)
-            speedMax *= params.boltSpeed * 0.8f;
+        if (f.bolting) {
+            f.boltLeft -= dt;
+            if (f.boltLeft <= 0.0f)
+                f.bolting = false;
+        }
+        // Boost decays over the burst rather than ending abruptly, so the
+        // fly eases back into its normal cruise.
+        if (f.bolting && !frozen) {
+            const float t = std::min(1.0f, f.boltLeft / params.boltFor);
+            speedMax *= 1.0f + (params.boltSpeed * 0.8f - 1.0f) * t;
+        }
         // A flier passing over the bin throttles back — hovering over the
         // thing it cares about, rather than treating it as scenery.
         if (!crawling && !f.leaving && overBin)
@@ -386,7 +441,7 @@ void FlySim::step(float dt)
         // as fast as the fly travels — fed in raw it read as twitching
         // rather than as flying. Smoothing the direction and not the
         // velocity leaves the speed untouched, so this costs no liveliness.
-        const float blend = std::min(1.0f, (crawling ? 6.0f : 2.6f) * dt);
+        const float blend = std::min(1.0f, (crawling ? 6.0f : 1.9f) * dt);
         f.dir += (raw - f.dir) * blend;
         const float sl = float(std::hypot(f.dir.x(), f.dir.y()));
         QPointF dir = sl > 0.001f ? f.dir / sl : raw;
@@ -446,7 +501,7 @@ void FlySim::step(float dt)
                 // far side and the fly oscillated in place.
                 if (nd > 1.0f)
                     desired -= (rel / d) * speedMax
-                               * std::min(1.6f, 1.0f + (nd - 1.0f) * 3.0f);
+                               * std::min(2.2f, 1.0f + (nd - 1.0f) * 3.5f);
             }
         }
         // The bin sits on the floor of the Dock: there is no space behind
@@ -466,6 +521,38 @@ void FlySim::step(float dt)
                 desired.ry() = desired.y() * (1.0f - t) - speedMax * 1.2f * t;
             }
         }
+        // Scatter from the cursor. Strongest at the centre and falling to
+        // nothing at the edge of the radius, so flies stream away rather
+        // than all snapping outward the instant it comes into range.
+        float fleeing = 0.0f;
+        if (m_cursorPresent && !f.leaving) {
+            const QPointF away = f.pos - m_cursor;
+            const float ad = float(std::hypot(away.x(), away.y()));
+            const float radius = params.fleeRadius * halfW * 2.0f;
+            if (ad < radius) {
+                fleeing = 1.0f - ad / radius;
+                const QPointF u = ad > 0.001f
+                    ? away / ad
+                    : QPointF(std::cos(f.wanderAngle), std::sin(f.wanderAngle));
+                // Referenced to FLYING speed, not the fly's current one: a
+                // crawler's cruise is a few px/s, and scaling the escape
+                // to that would have it stroll away from the cursor.
+                const float esc = params.flySpeed * k;
+                desired += u * esc * params.fleeForce * fleeing;
+                // Only a pointer genuinely on top of a crawler scares it
+                // off. Cancelling seekingLand anywhere in the radius meant
+                // a pointer merely NEAR the bin stopped flies landing at
+                // all, which is not what "scatter from the cursor" should
+                // do — and the on-bin case is already handled wholesale,
+                // by clearing the swarm.
+                if (crawling && fleeing > 0.55f) {
+                    enterMode(f, FlyMode::Flying);
+                    f.onSurface = false;
+                }
+            }
+        }
+        if (fleeing > 0.0f)
+            speedMax = std::max(speedMax, params.flySpeed * k * params.fleeSpeed * fleeing);
         // Separation — cheap O(n^2), fine at n<=6.
         QPointF push(0, 0);
         for (int j = 0; j < m_flies.size(); ++j) {

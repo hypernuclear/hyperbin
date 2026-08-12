@@ -73,6 +73,12 @@ struct Fly
     /// everything else on screen is in constant motion.
     float   freezeLeft = 0.0f;
     bool    bolting    = false;
+    float   boltLeft   = 0.0f;   // seconds of boosted speed remaining
+    /// Seconds of scattering left before a fly driven off by the pointer
+    /// is allowed to start fading. Without it they faded where they
+    /// stood, and the pointer read as killing flies rather than
+    /// scaring them.
+    float   scatterLeft = 0.0f;
 
     /// Actually crawling ON the bin this frame. The renderer clips
     /// these to the silhouette rather than occluding them.
@@ -93,6 +99,10 @@ public:
     /// leaving fly positions alone makes the whole swarm jump away from
     /// the icon. Existing flies are translated and scaled to match.
     void setBinRect(const QRectF &r);
+    /// Cursor position in overlay-local pixels, and whether it's close
+    /// enough to matter. Polled rather than delivered as events: the
+    /// overlay is click-through, so it never receives hover at all.
+    void setCursor(const QPointF &p, bool present);
     QRectF binRect() const { return m_bin; }
 
     /// Overlay half-size needed around the icon so the swarm never clips
@@ -107,11 +117,11 @@ public:
     /// tighter region clipped them at the window edge.
     static int marginX(qreal iconSize)
     {
-        return int(qMax(26.0, 0.72 * iconSize + spriteAllowance(iconSize)));
+        return int(qMax(30.0, 0.98 * iconSize + spriteAllowance(iconSize)));
     }
     static int marginTop(qreal iconSize)
     {
-        return int(qMax(30.0, 0.90 * iconSize + spriteAllowance(iconSize)));
+        return int(qMax(34.0, 1.12 * iconSize + spriteAllowance(iconSize)));
     }
     static int marginBottom(qreal iconSize)
     {
@@ -146,6 +156,10 @@ public:
 
     /// True when the swarm has fully dispersed and rendering can stop.
     /// Fullness 0 alone isn't enough — existing flies leave first.
+    QPointF cursor() const { return m_cursor; }
+    /// True while the pointer is over the bin: the swarm clears out and
+    /// stays away until it leaves.
+    bool cursorOnBin() const { return m_cursorOnBin; }
     bool isIdle() const { return m_flies.isEmpty() && m_fullness < 0.01f; }
 
     // Tunables — exposed for the live-tweak panel in dev builds. All
@@ -158,10 +172,10 @@ public:
 
         float lifeMin        = 2.0f;   // then it leaves and is replaced
         float lifeMax        = 6.0f;
-        float fadeTime       = 0.20f;  // arrival/departure ramp
+        float fadeTime       = 0.40f;  // arrival/departure ramp
 
         float crawlSpeed     = 6.0f;   // px/sec — a slow potter
-        float flySpeed       = 52.0f;  // px/sec — actual flying
+        float flySpeed       = 104.0f;  // px/sec — actual flying
 
         // Flying is the default state; crawling is a brief visit. The
         // previous split had them settling almost as often as flying,
@@ -206,11 +220,22 @@ public:
         float freezeMin      = 0.35f;  // seconds held dead still
         float freezeMax      = 1.10f;
         float boltSpeed      = 2.1f;   // multiple of normal flying speed
-        float boltFor        = 0.9f;   // seconds before it leaves for good
+        float boltFor        = 0.75f;  // seconds of boosted flight
+        float scatterMin     = 0.30f;  // seconds of flight before fading out
+        float scatterMax     = 0.65f;
+        float scatterSpeed   = 2.6f;   // multiple of flying speed
+        // Cursor scatter. Radius is a multiple of the icon's WIDTH, so it
+        // tracks Dock magnification like everything else. Keep it tight:
+        // at 1.9 it reached almost two icons either side, so a pointer
+        // resting anywhere near the Dock held the whole swarm off the bin
+        // and crawling stopped altogether.
+        float fleeRadius     = 0.85f;
+        float fleeForce      = 3.2f;   // multiple of flying speed
+        float fleeSpeed      = 1.8f;   // speed cap while fleeing
         float dartChance     = 0.005f; // per flying fly per step
         float dartImpulse    = 24.0f;
         float easeRate       = 0.9f;   // fullness lerp per sec
-        float frontShare     = 0.62f;  // fraction passing in front of the bin
+        float frontShare     = 0.38f;  // fraction passing in front of the bin
         /// Fliers throttle back while over the bin — they slow to look
         /// at it rather than barrelling straight past.
         float overBinSlow    = 0.6f;
@@ -219,7 +244,7 @@ public:
         // to be 1.35 — over an icon's full height above the bin, which
         // read as flies wandering off into the desktop rather than
         // bothering the rubbish.
-        float roamX          = 0.48f;
+        float roamX          = 0.55f;
         float roamUp         = 0.78f;
         float roamDown       = 0.42f;
         /// Constant inward bias, as a fraction of the roam region, applied
@@ -245,6 +270,9 @@ private:
     float    m_time = 0.0f;   // drives the noise field's evolution
     float    m_fullness       = 0.0f; // eased
     float    m_fullnessTarget = 0.0f;
+    QPointF  m_cursor;
+    bool     m_cursorPresent = false;
+    bool     m_cursorOnBin   = false;
     uint32_t m_rngState;
 };
 

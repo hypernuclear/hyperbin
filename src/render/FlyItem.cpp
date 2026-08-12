@@ -1,5 +1,6 @@
 #include "FlyItem.h"
 
+#include <QCursor>
 #include <QPainter>
 #include <QPainterPath>
 #include <QQuickWindow>
@@ -144,6 +145,12 @@ void FlyItem::setFrameIntervalMs(int ms)
 void FlyItem::tick()
 {
     const float dt = m_dt.isValid() ? float(m_dt.restart()) / 1000.0f : 0.05f;
+    // Cursor position is POLLED, not received as an event: the overlay is
+    // click-through by design, so it never gets hover or move events at
+    // all — the Dock beneath it does. One QCursor::pos() per frame is
+    // cheap next to the frame itself.
+    const QPointF local = mapFromGlobal(QPointF(QCursor::pos()));
+    m_sim.setCursor(local, true);
     m_sim.step(dt);
 
     // Tell the owner the moment the last fly leaves, so it can drop the

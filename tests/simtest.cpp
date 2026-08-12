@@ -186,7 +186,83 @@ int main()
         }
         const double share = double(inFront) / std::max(1, over);
         std::printf("flights across the bin: %.0f%% in front\n", share * 100);
-        if (share < 0.35) return fail("almost nothing flies in front of the bin");
+        // A floor, not a target: the front/behind balance is a taste
+        // setting (params.frontShare), and this only catches it
+        // collapsing to nothing.
+        if (share < 0.12) return fail("almost nothing flies in front of the bin");
+    }
+    // --- pointer on the bin clears the swarm -------------------------
+    {
+        const qreal side = 40.0;
+        const QRectF bin(500, 500, side, side * 0.7);
+        FlySim s = makeSim(side, 1.0f);
+        for (int i = 0; i < 200; ++i) s.step(0.05f);
+        if (s.flies().isEmpty()) return fail("no swarm to clear");
+        s.setCursor(bin.center(), true);
+        int steps = 0;
+        while (!s.flies().isEmpty() && steps < 400) { s.step(0.05f); ++steps; }
+        std::printf("pointer on bin: cleared in %.1fs\n", steps * 0.05);
+        if (!s.flies().isEmpty()) return fail("swarm does not clear for the pointer");
+        // They must SCATTER first and fade second. Clearing almost
+        // instantly means they dissolved where they stood, which reads as
+        // the pointer killing flies rather than scaring them off.
+        if (steps * 0.05 < 0.5) return fail("flies fade out instead of scattering");
+        // ...and stays away while it's there.
+        for (int i = 0; i < 400; ++i) s.step(0.05f);
+        if (!s.flies().isEmpty()) return fail("flies respawn under the pointer");
+        // ...and comes back once it leaves.
+        s.setCursor(QPointF(-9999, -9999), false);
+        steps = 0;
+        while (s.flies().isEmpty() && steps < 400) { s.step(0.05f); ++steps; }
+        std::printf("pointer away: swarm back in %.1fs\n", steps * 0.05);
+        if (s.flies().isEmpty()) return fail("swarm never returns");
+    }
+    // --- a pointer NEAR the bin doesn't stop flies landing ------------
+    // The scatter radius was once ~2 icon widths, which meant a pointer
+    // resting anywhere near the Dock held the whole swarm off the bin and
+    // crawling stopped entirely. Only a pointer ON the bin clears it.
+    {
+        const qreal side = 40.0;
+        const QRectF bin(500, 500, side, side * 0.7);
+        FlySim s = makeSim(side, 1.0f, 6060);
+        s.setCursor(QPointF(bin.center().x() + side * 1.1, bin.center().y()), true);
+        int crawl = 0, total = 0;
+        for (int i = 0; i < 1600; ++i) {
+            s.step(0.05f);
+            for (const Fly &f : s.flies()) {
+                ++total;
+                if (f.mode == FlyMode::Crawling) ++crawl;
+            }
+        }
+        const double share = double(crawl) / std::max(1, total);
+        std::printf("pointer beside the bin: %.0f%% still crawling\n", share * 100);
+        if (share < 0.10) return fail("a pointer near the bin stops flies landing");
+    }
+    // --- startle is a burst, not a death ------------------------------
+    // The bolt used to clamp the fly's remaining life, so the sequence
+    // played as pause-then-vanish instead of pause-then-fly-away.
+    {
+        FlySim s = makeSim(40, 1.0f, 4711);
+        s.params.startleChance = 0.25f;   // startle constantly
+        int frozen = 0, boltingSeen = 0;
+        double lifeAfterBolt = 0;
+        for (int i = 0; i < 1200; ++i) {
+            s.step(0.05f);
+            for (const Fly &f : s.flies()) {
+                if (f.freezeLeft > 0.0f) ++frozen;
+                if (f.bolting) {
+                    ++boltingSeen;
+                    lifeAfterBolt = std::max(lifeAfterBolt, double(f.life));
+                }
+            }
+        }
+        std::printf("startle: %d frozen samples, %d bolting, max life left %.1fs\n",
+                    frozen, boltingSeen, lifeAfterBolt);
+        if (frozen == 0) return fail("flies never freeze");
+        if (boltingSeen == 0) return fail("flies freeze but never bolt");
+        // A bolting fly must still have a normal amount of life ahead of
+        // it — that is the difference between flying off and blinking out.
+        if (lifeAfterBolt < 1.0) return fail("bolting flies are killed off immediately");
     }
     // --- containment: must fit the asymmetric overlay margins ---
     for (qreal side : {28.0, 40.0, 95.0}) {

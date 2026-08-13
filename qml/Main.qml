@@ -36,7 +36,12 @@ Window {
     // hole was indistinguishable from a rendering failure.
     Image {
         visible: windowedMode
-        source: "image://preview/bin"
+        // Source, not just visibility: an Image loads its source whether
+        // or not it is shown, so binding only `visible` still sent
+        // overlay mode to the provider — which has no preview artwork
+        // outside dev mode and answered with "Failed to get image from
+        // provider" on every launch.
+        source: windowedMode ? "image://preview/bin" : ""
         x: flies.binRect.x
         y: flies.binRect.y
         width: flies.binRect.width

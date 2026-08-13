@@ -53,12 +53,36 @@ struct HitTest
     HWND  hit    = nullptr;
 };
 
+/// A HUD rather than something the user is working in.
+///
+/// Topmost AND (a tool window or click-through) is the signature of an
+/// overlay: screen-capture selection layers, magnifiers, on-screen
+/// keyboards, notification HUDs. Treating those as "the desktop is
+/// covered" is what made the swarm vanish the moment Hypershot's capture
+/// overlay went up — so every screenshot of hyperbin came out empty, and
+/// so would any user's screenshot of their own desktop.
+///
+/// The failure modes are not symmetric, which is what decides this. Get
+/// it wrong this way and we keep rendering underneath something opaque:
+/// a little wasted GPU, nothing visibly wrong. Get it wrong the other way
+/// and the effect is missing from the picture the user was trying to
+/// take. An "always on top" media player is topmost but NOT a tool
+/// window, so it still counts as covering — which is right, it is a real
+/// window in the way.
+bool isOverlayWindow(HWND hwnd)
+{
+    const LONG_PTR ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    if (!(ex & WS_EX_TOPMOST))
+        return false;
+    return (ex & WS_EX_TOOLWINDOW) || (ex & WS_EX_TRANSPARENT);
+}
+
 BOOL CALLBACK topmostAt(HWND hwnd, LPARAM lp)
 {
     auto *t = reinterpret_cast<HitTest *>(lp);
     if (hwnd == t->ignore || !IsWindowVisible(hwnd) || IsIconic(hwnd))
         return TRUE;
-    if (isCloaked(hwnd))
+    if (isCloaked(hwnd) || isOverlayWindow(hwnd))
         return TRUE;
 
     RECT r{};

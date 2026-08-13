@@ -83,8 +83,16 @@ public:
         /// half producing a smear too shallow to see through a
         /// translucent bin — the effect existed but was not visible.
         float minShare  = 0.70f;
-        float creepRate = 0.22f;  // level per second, filling
-        float recedeRate = 0.55f; // and draining: emptying is a relief
+        /// How briskly the level converges on where it should be, as the
+        /// natural frequency of a critically damped spring — roughly,
+        /// 4.7 / this is the time to get most of the way there.
+        ///
+        /// A spring rather than a rate, because a rate is a straight
+        /// line: the level set off at full speed, held it the whole way,
+        /// and stopped dead on arrival. Nothing thick moves like that.
+        /// This leaves at nothing, gathers pace, and settles in.
+        float creepEase  = 3.4f;  // filling: about 1.4s
+        float recedeEase = 5.0f;  // and draining: emptying is a relief
         int   frameIntervalMs = 33;
     };
     Params params;
@@ -93,6 +101,7 @@ private:
     QRectF m_bin;
     float  m_target = 0.0f;
     float  m_level  = 0.0f;
+    float  m_vel    = 0.0f;   // level per second, for the ease
     float  m_time   = 0.0f;
 };
 

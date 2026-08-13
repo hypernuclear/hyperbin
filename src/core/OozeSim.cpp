@@ -48,11 +48,29 @@ void OozeSim::step(float dt)
                * (params.minShare + (1.0f - params.minShare) * shape);
     }
 
-    const float rate = want > m_level ? params.creepRate : params.recedeRate;
-    const float delta = want - m_level;
-    const float stepBy = rate * dt;
-    m_level = std::abs(delta) <= stepBy ? want
-                                        : m_level + (delta > 0 ? stepBy : -stepBy);
+    // Critically damped, so it eases at both ends and never overshoots.
+    //
+    // This used to be a constant rate, which is a straight line: the
+    // level left at full speed, held it the whole way and stopped dead
+    // the instant it arrived. On something the size of a Dock icon that
+    // reads as a bar filling rather than as a substance rising. A spring
+    // starts at nothing, gathers pace and settles in, which is what the
+    // eye expects of anything with mass.
+    //
+    // Velocity first, then position — semi-implicit, which stays stable
+    // at the frame intervals this runs at where the explicit form would
+    // not.
+    const float omega = want > m_level ? params.creepEase : params.recedeEase;
+    m_vel += (omega * omega * (want - m_level) - 2.0f * omega * m_vel) * dt;
+    m_level += m_vel * dt;
+    // A spring approaches its target asymptotically and would rebuild the
+    // mesh forever chasing the last thousandth. Close and slow is
+    // arrived.
+    if (std::abs(want - m_level) < 0.002f && std::abs(m_vel) < 0.02f) {
+        m_level = want;
+        m_vel = 0.0f;
+    }
+    m_level = std::clamp(m_level, 0.0f, 1.0f);
     if (m_level < 0.0005f)
         m_level = 0.0f;
 

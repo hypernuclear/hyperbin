@@ -3,7 +3,15 @@
 #include "FlySim.h"
 #include "DistanceField.h"
 #include <QProcess>
+// _exit(), for the kill-the-writer half of the persistence test. POSIX
+// declares it in <unistd.h>, which does not exist on MSVC; there it lives
+// in <process.h>. Same function either way — the point is to leave
+// without running a single destructor.
+#if defined(_WIN32)
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 #include "OozeSim.h"
 #include "Settings.h"
 

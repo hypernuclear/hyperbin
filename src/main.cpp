@@ -82,7 +82,13 @@ int main(int argc, char **argv)
         // solid contents behind it, and an effect that reads well over
         // the first can be unrecognisable over the second. Tuning against
         // a stand-in cost several rounds of exactly that.
+#if defined(Q_OS_MACOS)
         previewIcon = macTrashIcon(512, true);
+#endif
+        // Windows falls straight through to the glyph below. That is the
+        // stand-in the comment above warns about, so treat a preview tuned
+        // here with suspicion until the Recycle Bin's own artwork is
+        // wired in — RecycleBinTarget::iconImage() already returns it.
         if (previewIcon.isNull()) {
             QSvgRenderer glyph(QStringLiteral(":/icons/hyperbin.svg"));
             if (glyph.isValid()) {

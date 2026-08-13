@@ -90,6 +90,25 @@ float waveAt(vec3 q)
 {
     return sin(q.y * (6.2831853 / (binWidth * 0.38)) - time * 0.85);
 }
+// Blisters in the puddle: a few rounded domes, as though gas had worked
+// its way up and set there. A quadratic falloff rather than a noise
+// octave, because what is wanted is a handful of distinct ROUND things,
+// and noise of any spectrum gives an even scatter of bumps instead.
+float blisterAt(vec3 q)
+{
+    float s = 0.0;
+    for (int i = 0; i < 5; ++i) {
+        float fi = float(i);
+        // Golden-angle spread, so five of them never line up, drifting
+        // slowly enough to read as the puddle still settling.
+        float ang = fi * 2.399963 + time * 0.028;
+        float rad = binWidth * (0.16 + 0.10 * fract(sin(fi * 17.31) * 43758.5));
+        vec2 centre = vec2(sin(ang), cos(ang)) * rad;
+        float d = length(q.xz - centre) / (binWidth * 0.13);
+        s = max(s, max(0.0, 1.0 - d * d));
+    }
+    return s;
+}
 // Where the puddle has gathered.
 //
 // A ring of even thickness is the one thing a spill never is: it runs to
@@ -105,8 +124,8 @@ float gatherAt(vec3 q)
     // Nothing right on the axis, where the angle is meaningless and the
     // pool's underside closes to a point.
     float away = min(1.0, length(q.xz) / (binWidth * 0.10));
-    return (sin(a * 2.0 + time * 0.070) * 0.60
-          + sin(a * 3.0 - time * 0.045 + 1.7) * 0.40) * away;
+    return (sin(a * 2.0 + time * 0.045) * 0.60
+          + sin(a * 3.0 - time * 0.028 + 1.7) * 0.40) * away;
 }
 // What the NORMAL is tilted by: the coarse field the vertices actually
 // moved through, the wave they travel on, the puddle's gathering, and
@@ -118,8 +137,9 @@ float shadeAt(vec3 q, float lumpScale, float poolW, out float coarse,
     fine = fineAt(q);
     return coarse * binWidth * 0.030 * lumpScale
          + fine * binWidth * 0.030
-         + waveAt(q) * binWidth * 0.016
-         + gatherAt(q) * binWidth * 0.075 * poolW;
+         + waveAt(q) * binWidth * 0.026 * (1.0 - poolW)
+         + gatherAt(q) * binWidth * 0.042 * poolW
+         + blisterAt(q) * binWidth * 0.055 * poolW;
 }
 void MAIN()
 {
@@ -151,7 +171,9 @@ void MAIN()
     // surface got noisier and no lumpier, which is a good description of
     // aliasing.
     // The puddle's share of this vertex: all of it at the floor, none of
-    // it by the time the body has started tapering.
+    // it by the time the body has started tapering. The travelling wave
+    // is windowed by its complement — a puddle has settled, and running
+    // the flow through it made it churn like the walls above.
     float poolW = 1.0 - smoothstep(0.02, 0.20, UV0.y);
     float e = binWidth * 0.011;
     float lumpRaw, fine, ignored;
@@ -161,14 +183,23 @@ void MAIN()
     // The coarse noise and the wave move the vertex; the fine band does
     // not, because the mesh cannot hold it.
     float d0 = lumpRaw * binWidth * 0.030 * lumpScale
-             + waveAt(VERTEX) * binWidth * 0.016
-             + gatherAt(VERTEX) * binWidth * 0.075 * poolW;
+             + waveAt(VERTEX) * binWidth * 0.026 * (1.0 - poolW)
+             + gatherAt(VERTEX) * binWidth * 0.042 * poolW
+             + blisterAt(VERTEX) * binWidth * 0.055 * poolW;
 
     // ...and a breath. One slow cycle over about ten seconds, swelling
     // the whole body a hair — a thing that is perfectly still reads as a
     // model rather than as something alive.
     float breath = 1.0 + 0.014 * sin(time * 0.62);
 
+    // Never inside the bin.
+    //
+    // UV1.y is how much clearance this vertex has — the gap between the
+    // gel's own radius here and the bin's. The undulations swing both
+    // ways, and on a body only a tenth proud of the icon a trough was
+    // enough to pull the goo in behind the outline it is supposed to be
+    // running down. Outward is unbounded; inward stops at the bin.
+    d0 = max(d0, -UV1.y);
     vec3 pos = VERTEX * breath + nrm * d0;
     // The rim's own undulation, and it DRIFTS.
     //

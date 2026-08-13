@@ -101,6 +101,15 @@ float OozeShape::radiusAt(float y) const
     return std::max(blended, m_binW * 0.05f) * 1.10f;
 }
 
+float OozeShape::binHalfWidthAt(float y) const
+{
+    const float halfH = m_binH * 0.5f;
+    const float t = std::clamp((halfH - y) / m_binH, 0.0f, 0.9999f);
+    const float f = t * (kRows - 1);
+    const int i0 = int(f);
+    const int i1 = std::min(i0 + 1, kRows - 1);
+    return m_prof[i0] + (m_prof[i1] - m_prof[i0]) * (f - i0);
+}
 float OozeShape::surfaceY(float contentLine, float level) const
 {
     const float halfH = m_binH * 0.5f;

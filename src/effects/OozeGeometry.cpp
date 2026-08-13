@@ -97,7 +97,16 @@ void OozeGeometry::rebuild()
     // develop that disagreement.
     struct P { float r, y; };
     QVector<P> outline;
-    auto push = [&](float r, float y) { outline.push_back({std::max(r, 0.0f), y}); };
+    // Where each row sits along the BODY, 0 at the pool's top and 1 at
+    // the collar, or -1 for a row that is not part of the body. The
+    // ridges are applied per vertex in the sweep rather than baked into
+    // the radius here, because a ridge that tilts is not the same at
+    // every angle and a profile cannot say that.
+    QVector<float> rowT;
+    auto push = [&](float r, float y) {
+        outline.push_back({std::max(r, 0.0f), y});
+        rowT.push_back(-1.0f);
+    };
 
     // The puddle. Wider than the foot of the body and rolled under at its
     // edge, so it reads as liquid that has spread out rather than as a
@@ -142,29 +151,68 @@ void OozeGeometry::rebuild()
     const float bead = m_binH * 0.030f;
     // Ridges, stacked up the taper.
     //
-    // Each one swells toward its top and tucks in sharply above — the
-    // same move the lip makes at the rim, repeated on the way down. It is
-    // what something thick does as it runs: it gathers, holds, and lets
-    // go, and it leaves a ledge everywhere it paused.
-    constexpr int kRidges = 3;
-    auto ridgeAt = [](float t) {
-        const float band = t * kRidges;
-        const float u = band - std::floor(band);
-        auto ss = [](float a, float b, float x) {
-            const float k = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
+    // Each swells toward its top and tucks in sharply above — the same
+    // move the lip makes at the rim, repeated on the way down. It is what
+    // something thick does as it runs: it gathers, holds, and lets go,
+    // and it leaves a ledge everywhere it paused.
+    //
+    // Placed at jittered heights, not on a grid, and each with its own
+    // span, weight and tilt. Evenly spaced ledges of equal size read as
+    // machining — as fluting turned on a lathe — and no amount of getting
+    // the profile right rescues that. The jitter is deterministic, like
+    // everything else here: same bin, same ridges.
+    constexpr int kRidges = 8;
+    struct Ridge { float at, span, amp, tilt, phase; };
+    Ridge ridges[kRidges];
+    {
+        auto h = [](int i, int salt) {
+            const float v = std::sin(float(i) * 12.9898f + float(salt) * 78.233f)
+                          * 43758.5453f;
+            return v - std::floor(v);
+        };
+        for (int i = 0; i < kRidges; ++i) {
+            // One per slot, jittered well inside it, so they never
+            // collide but never line up either.
+            ridges[i].at    = (float(i) + 0.10f + 0.80f * h(i, 1)) / kRidges;
+            // Spans and weights that differ by a factor of four, not a
+            // few per cent. A set of ledges that are all much the same
+            // size still reads as machining however you space them —
+            // what says "this ran" is that one is a thick roll and the
+            // next is a faint crease.
+            ridges[i].span  = (0.25f + 1.15f * h(i, 2)) / kRidges;
+            ridges[i].amp   = 0.25f + 0.75f * h(i, 3);
+            // A ledge left by something running down a curved wall is
+            // never truly level.
+            ridges[i].tilt  = (h(i, 4) - 0.5f) * 0.9f;
+            ridges[i].phase = h(i, 5) * 6.2831853f;
+        }
+    }
+    // How much a ridge swells the body at height t, seen from angle a.
+    auto ridgeAt = [&](float t, float a) {
+        auto ss = [](float lo, float hi, float x) {
+            const float k = std::clamp((x - lo) / (hi - lo), 0.0f, 1.0f);
             return k * k * (3.0f - 2.0f * k);
         };
-        // Uneven. Three identical ledges evenly spaced is a ribbed hose;
-        // what makes it read as something that ran is that each pause
-        // held a different amount.
-        const float weight[3] = {1.0f, 0.55f, 0.80f};
-        const int idx = std::clamp(int(band), 0, kRidges - 1);
-        return ss(0.0f, 0.75f, u) * (1.0f - ss(0.82f, 1.0f, u)) * weight[idx];
+        float best = 0.0f;
+        for (const Ridge &r : ridges) {
+            // The tilt slides the ridge up and down with angle, which is
+            // what stops it reading as a machined ring.
+            const float at = r.at + r.tilt * r.span * std::cos(a - r.phase);
+            const float u = (t - (at - r.span)) / (2.0f * r.span);
+            if (u <= 0.0f || u >= 1.0f)
+                continue;
+            // Overlaps take the deeper of the two rather than stacking:
+            // two ridges that happened to meet would otherwise make one
+            // twice the size of any other.
+            best = std::max(best,
+                            ss(0.0f, 0.75f, u) * (1.0f - ss(0.82f, 1.0f, u))
+                                * r.amp);
+        }
+        return best;
     };
     // Enough rows that the tuck above each ridge is an edge rather than a
-    // chamfer: three ridges over twenty-four rows gave each one eight,
-    // and its whole falling side was two of them.
-    constexpr int kBody = 44;
+    // chamfer.
+    constexpr int kBody = 56;
     for (int j = 1; j <= kBody; ++j) {
         const float t = float(j) / kBody;
         const float y = poolTop + ((collarTop - bead) - poolTop) * t;
@@ -178,15 +226,13 @@ void OozeGeometry::rebuild()
         // only ever see the middle of that ellipse, which is its
         // flattest part. Bring the ring in to about the bin's own radius
         // and nearly all of the curve is visible.
+        //
         // Barely thinned. At fifteen per cent this cancelled the bin's
         // own taper outright — the gel came out a cylinder, and a foot as
         // wide as the rim is exactly what "too fat at the bottom" means.
         const float thin = 1.0f - 0.06f * t * t;
-        // Shallower than they were. The travelling wave in the vertex
-        // shader now bands the body as well, and the two together were
-        // corrugating it — the ledges are where the goo PAUSED, and
-        // there is no reason for them to be as deep as the flow itself.
-        push(shape.radiusAt(y) * (1.0f + 0.030f * ridgeAt(t)) * thin, y);
+        push(shape.radiusAt(y) * thin, y);
+        rowT.last() = t;
     }
     // The lip has to start exactly where the body stopped. Taking it from
     // radiusAt() again dropped the thinning above, so the two met with a
@@ -240,7 +286,7 @@ void OozeGeometry::rebuild()
     // the whole effect being mis-centred, which is exactly how it was
     // reported. The undulation lives in the vertex shader now, where it
     // drifts and averages out.
-    struct V { QVector3D p, n; float thick, height, cap; };
+    struct V { QVector3D p, n; float thick, height, cap, room; };
     QVector<V> verts;
     QVector<quint32> idx;
     verts.resize(nr * kU);
@@ -257,15 +303,26 @@ void OozeGeometry::rebuild()
         const float hFrac = std::clamp((outline[j].y - poolBottom)
                                            / std::max(1.0f, bodyTop - poolBottom),
                                        0.0f, 1.0f);
+        // How far the shader's undulations may pull this row inward
+        // before the gel would be narrower than the bin it is running
+        // down. Handed over per vertex because only this side knows both
+        // numbers, and "do not go inside the bin" is not something a
+        // displacement field can work out for itself.
+        const float room = std::max(0.0f, outline[j].r
+                                              - shape.binHalfWidthAt(outline[j].y));
         for (int i = 0; i < kU; ++i) {
             const float a = 2.0f * float(M_PI) * float(i) / kU;
-            const float r = outline[j].r;
+            const float ridge = rowT[j] >= 0.0f
+                                  ? 1.0f + 0.038f * ridgeAt(rowT[j], a)
+                                  : 1.0f;
+            const float r = outline[j].r * ridge;
             const float y = outline[j].y;
             verts[j * kU + i].p = QVector3D(r * std::sin(a), y,
                                             r * std::cos(a) * kDepth);
             verts[j * kU + i].thick = std::max(std::abs(std::cos(a)), capT * 0.9f);
             verts[j * kU + i].height = hFrac;
             verts[j * kU + i].cap = capT;
+            verts[j * kU + i].room = room;
         }
     }
     // Normals from the MESH, not from the profile.
@@ -303,9 +360,10 @@ void OozeGeometry::rebuild()
         }
     }
 
-    // position, normal, (thickness, height), (cap, 0). The cap flag has
-    // to reach the fragment shader so it can cut the bin's shape out of
-    // the gel's top surface, and there is nothing else free to carry it.
+    // position, normal, (thickness, height), (cap, room). The cap flag
+    // has to reach the fragment shader so it can cut the bin's shape out
+    // of the gel's top surface; room is the vertex shader's inward
+    // budget. Nothing else is free to carry either.
     constexpr int kFloats = 10;
     QByteArray vbuf;
     vbuf.resize(verts.size() * int(sizeof(float)) * kFloats);
@@ -315,7 +373,7 @@ void OozeGeometry::rebuild()
         *vp++ = v.p.x(); *vp++ = v.p.y(); *vp++ = v.p.z();
         *vp++ = v.n.x(); *vp++ = v.n.y(); *vp++ = v.n.z();
         *vp++ = v.thick; *vp++ = v.height;
-        *vp++ = v.cap;   *vp++ = 0.0f;
+        *vp++ = v.cap;   *vp++ = v.room;
         lo.setX(std::min(lo.x(), v.p.x())); lo.setY(std::min(lo.y(), v.p.y()));
         lo.setZ(std::min(lo.z(), v.p.z()));
         hi.setX(std::max(hi.x(), v.p.x())); hi.setY(std::max(hi.y(), v.p.y()));

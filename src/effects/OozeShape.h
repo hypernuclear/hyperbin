@@ -27,6 +27,11 @@ public:
 
     /// Half-width of the gel at a height, already widened past the bin.
     float radiusAt(float y) const;
+    /// Half-width of the BIN itself at a height — the raw measurement,
+    /// before any widening or blending. What the gel is not allowed to
+    /// shrink inside of: the difference between this and radiusAt() is
+    /// the whole of the room an undulation has to move inward in.
+    float binHalfWidthAt(float y) const;
 
     /// The bottom of the bin's ARTWORK, which is not the bottom of its
     /// rect: the rect is the Dock's square tile and the bin sits well

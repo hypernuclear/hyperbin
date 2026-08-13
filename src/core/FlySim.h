@@ -111,9 +111,18 @@ struct Fly
     /// scaring them.
     float   scatterLeft = 0.0f;
 
-    /// Actually crawling ON the bin this frame. The renderer clips
-    /// these to the silhouette rather than occluding them.
+    /// Actually crawling ON the bin this frame.
     bool    onSurface   = false;
+    /// Crawling, and its CENTRE has left the silhouette — walking around
+    /// the side of the bin. Only then does the renderer clip it, so it
+    /// slides out of view around the edge instead of floating off it.
+    ///
+    /// Every crawler used to be clipped, all the time. A fly standing
+    /// near the rim is mostly on the bin and partly over the edge, so
+    /// what that did was slice off whichever wing was overhanging — a
+    /// fly with a bite taken out of it, on a body that was plainly
+    /// sitting on the surface.
+    bool    clipToBin   = false;
 };
 
 /// Drives the swarm. Deterministic given a seed — same seed, same flight

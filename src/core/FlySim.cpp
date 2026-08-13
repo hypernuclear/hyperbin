@@ -824,15 +824,16 @@ void FlySim::step(float dt)
         // instead of taking off. Walking to the rim and stepping back is
         // what a fly does; launching every time it clips an edge is not.
         //
-        // The probe is the fly's NOSE, not its centre. It used to be a
-        // quarter-second of travel — about 2px at crawl pace — while the
-        // fly itself is several px long, so its front half was already
-        // over the rim and being sliced by the mask before anything
-        // steered it back. What that looks like on screen is a fly
-        // walking toward the edge and losing its head.
+        // The probe is a THIRD of the fly's half-width ahead of its
+        // centre, not a whole one. A full sprite radius was the right
+        // answer while every crawler was clipped to the silhouette: the
+        // fly had to be turned before any of it overhung the rim, or the
+        // mask sliced whatever did. It is the wrong answer now that a fly
+        // standing on the bin draws whole, and it kept them a body-length
+        // clear of an edge they are allowed to stand on.
         if (crawling && !f.leaving && m_covW > 0) {
             const float icon  = float(qMax(m_bin.width(), m_bin.height()));
-            const float reach = float(spriteHalf(icon, f.scale));
+            const float reach = float(spriteHalf(icon, f.scale)) * 0.35f;
             QPointF heading(std::cos(f.walkAngle), std::sin(f.walkAngle));
             const float vl = float(std::hypot(f.vel.x(), f.vel.y()));
             if (vl > 0.001f)
@@ -1016,6 +1017,11 @@ void FlySim::step(float dt)
                     f.vel.setY(0);
             }
         }
+        // Where the renderer should clip this one, decided AFTER the move
+        // rather than before it. It is a statement about where the fly
+        // ends the frame, and setting it up with the steering left it a
+        // step stale — describing a position the fly had already left.
+        f.clipToBin = crawling && !onSurfaceAt(f.pos);
         // Heading follows travel, but ROTATES toward it at a limited
         // rate rather than snapping. Snapping is what made a slow fly
         // spin: tiny velocity changes swing atan2 wildly, and the sprite

@@ -369,6 +369,7 @@ int main(int argc, char **argv)
 
         int landed = 0, landedOffArt = 0;
         int bareFrames = 0, frames = 0;
+        int clippedOnArt = 0, unclippedOffArt = 0;
         for (int i = 0; i < 2400; ++i) {
             s.step(0.05f);
             ++frames;
@@ -377,10 +378,19 @@ int main(int argc, char **argv)
                 if (f.mode != FlyMode::Crawling || f.leaving) continue;
                 ++landed;
                 ++onBin;
-                if (!s.onSurfaceAt(f.pos)) ++landedOffArt;
+                const bool onArt = s.onSurfaceAt(f.pos);
+                if (!onArt) ++landedOffArt;
+                // The clip flag has to mean exactly one thing: this fly's
+                // centre has left the silhouette. Anything looser and the
+                // renderer goes back to slicing wings off flies that are
+                // plainly standing on the bin.
+                if (f.clipToBin && onArt) ++clippedOnArt;
+                if (!f.clipToBin && !onArt) ++unclippedOffArt;
             }
             if (onBin == 0) ++bareFrames;
         }
+        if (clippedOnArt || unclippedOffArt)
+            return fail("clipToBin does not track the fly leaving the silhouette");
         const double offShare = double(landedOffArt) / std::max(1, landed);
         const double bareShare = double(bareFrames) / frames;
         std::printf("landed off the artwork: %.1f%%; bin bare %.1f%% of frames\n",

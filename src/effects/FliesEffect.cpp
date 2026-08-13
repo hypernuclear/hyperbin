@@ -358,8 +358,8 @@ QSGNode *FliesEffect::updateNode(QSGNode *old, QQuickWindow *window,
 
     int nBehind = showRect ? 1 : 0, nSurface = 0, nFront = 0;
     for (const Fly &f : flies) {
-        if (f.onSurface)    ++nSurface;
-        else if (f.inFront) ++nFront;
+        if (f.clipToBin)    ++nSurface;
+        else if (f.inFront || f.onSurface) ++nFront;
         else                ++nBehind;
     }
 
@@ -421,8 +421,12 @@ QSGNode *FliesEffect::updateNode(QSGNode *old, QQuickWindow *window,
         const int frame = int(f.phase) % kFlyFrames;
         const float u0 = float(frame) / kFlyFrames;
         const float u1 = float(frame + 1) / kFlyFrames;
-        auto *dst = f.onSurface ? vs : (f.inFront ? vf : vb);
-        int  &idx = f.onSurface ? js : (f.inFront ? jf : i);
+        // A crawler draws in the FRONT batch — unoccluded, uncut. It is
+        // standing on the near face of the bin; nothing is in front of
+        // it. Only one that has walked its centre off the silhouette goes
+        // in the clipped batch.
+        auto *dst = f.clipToBin ? vs : ((f.inFront || f.onSurface) ? vf : vb);
+        int  &idx = f.clipToBin ? js : ((f.inFront || f.onSurface) ? jf : i);
         auto put = [&](float lx, float ly, float u, float w) {
             dst[idx].set(x + lx * ca - ly * sa, y + lx * sa + ly * ca, u, w);
             ++idx;

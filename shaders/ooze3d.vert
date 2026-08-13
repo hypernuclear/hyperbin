@@ -137,7 +137,7 @@ float shadeAt(vec3 q, float lumpScale, float poolW, out float coarse,
     fine = fineAt(q);
     return coarse * binWidth * 0.030 * lumpScale
          + fine * binWidth * 0.030
-         + waveAt(q) * binWidth * 0.026 * (1.0 - poolW)
+         + waveAt(q) * binWidth * 0.015 * (1.0 - poolW)
          + gatherAt(q) * binWidth * 0.042 * poolW
          + blisterAt(q) * binWidth * 0.055 * poolW;
 }
@@ -183,7 +183,7 @@ void MAIN()
     // The coarse noise and the wave move the vertex; the fine band does
     // not, because the mesh cannot hold it.
     float d0 = lumpRaw * binWidth * 0.030 * lumpScale
-             + waveAt(VERTEX) * binWidth * 0.026 * (1.0 - poolW)
+             + waveAt(VERTEX) * binWidth * 0.015 * (1.0 - poolW)
              + gatherAt(VERTEX) * binWidth * 0.042 * poolW
              + blisterAt(VERTEX) * binWidth * 0.055 * poolW;
 

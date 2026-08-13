@@ -297,9 +297,17 @@ void OozeGeometry::rebuild()
         // cannot know the body's radius at a given height, and derived
         // from z it made the meniscus — the thing you are looking through
         // the most of — come out the thinnest.
-        const float capT = firstCap > 0 && j >= firstCap
-                             ? float(j - firstCap + 1) / kCap
-                             : 0.0f;
+        // All of it, or none of it.
+        //
+        // This used to ramp from 1/kCap upward, but it is applied over
+        // kCap + kLip rows — so the lip's first rows came out below the
+        // half that the fragment shader discards at, and the lip was
+        // never cut at all. The lip is the part of the gel that reaches
+        // highest, which meant the goo's visible top edge sat at the
+        // liquid's own surface no matter what the collar was set to:
+        // moving the collar by a fifth of the bin's height moved that
+        // edge by one pixel.
+        const float capT = firstCap > 0 && j >= firstCap ? 1.0f : 0.0f;
         const float hFrac = std::clamp((outline[j].y - poolBottom)
                                            / std::max(1.0f, bodyTop - poolBottom),
                                        0.0f, 1.0f);

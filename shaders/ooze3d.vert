@@ -79,14 +79,47 @@ float fineAt(vec3 q)
 // rose past. They are gone for now; see qml/OozeVisual.qml. The loop
 // sampled twelve texels three times per vertex and the spheres cost a
 // second draw pass, and none of it was earning its energy.
+// A wave travelling DOWN the body, on top of the noise.
+//
+// The ridges in the mesh are where the goo paused on its way down; this
+// is the going-down itself. It is a plain sine in height, which is why
+// it reads as one motion rather than as more texture — every noise
+// octave here is deliberately incoherent, and nothing incoherent ever
+// looks like flow.
+float waveAt(vec3 q)
+{
+    return sin(q.y * (6.2831853 / (binWidth * 0.38)) - time * 0.85);
+}
+// Where the puddle has gathered.
+//
+// A ring of even thickness is the one thing a spill never is: it runs to
+// wherever the last of it happened to go and piles up there. Two low
+// harmonics give a couple of fat lobes and a couple of thin spots, and
+// they turn — slowly enough to read as the goo still finding its level
+// rather than as a puddle sliding about, and slowly is the point. Baked
+// in, an asymmetry this large would be a permanent lean, which is what
+// the rim's undulation used to be and what it looked like.
+float gatherAt(vec3 q)
+{
+    float a = atan(q.x, q.z + 1e-4);
+    // Nothing right on the axis, where the angle is meaningless and the
+    // pool's underside closes to a point.
+    float away = min(1.0, length(q.xz) / (binWidth * 0.10));
+    return (sin(a * 2.0 + time * 0.070) * 0.60
+          + sin(a * 3.0 - time * 0.045 + 1.7) * 0.40) * away;
+}
 // What the NORMAL is tilted by: the coarse field the vertices actually
-// moved through, plus the fine detail that only exists here.
-float shadeAt(vec3 q, float lumpScale, out float coarse, out float fine)
+// moved through, the wave they travel on, the puddle's gathering, and
+// the fine detail that only exists here.
+float shadeAt(vec3 q, float lumpScale, float poolW, out float coarse,
+              out float fine)
 {
     coarse = coarseAt(q);
     fine = fineAt(q);
     return coarse * binWidth * 0.030 * lumpScale
-         + fine * binWidth * 0.030;
+         + fine * binWidth * 0.030
+         + waveAt(q) * binWidth * 0.016
+         + gatherAt(q) * binWidth * 0.075 * poolW;
 }
 void MAIN()
 {
@@ -117,13 +150,19 @@ void MAIN()
     // gradient at all — it was two unrelated values of the noise. The
     // surface got noisier and no lumpier, which is a good description of
     // aliasing.
+    // The puddle's share of this vertex: all of it at the floor, none of
+    // it by the time the body has started tapering.
+    float poolW = 1.0 - smoothstep(0.02, 0.20, UV0.y);
     float e = binWidth * 0.011;
     float lumpRaw, fine, ignored;
-    float s0 = shadeAt(VERTEX, lumpScale, lumpRaw, fine);
-    float su = shadeAt(VERTEX + t1 * e, lumpScale, ignored, ignored);
-    float sv = shadeAt(VERTEX + t2 * e, lumpScale, ignored, ignored);
-    // Only the coarse part moves the vertex.
-    float d0 = lumpRaw * binWidth * 0.030 * lumpScale;
+    float s0 = shadeAt(VERTEX, lumpScale, poolW, lumpRaw, fine);
+    float su = shadeAt(VERTEX + t1 * e, lumpScale, poolW, ignored, ignored);
+    float sv = shadeAt(VERTEX + t2 * e, lumpScale, poolW, ignored, ignored);
+    // The coarse noise and the wave move the vertex; the fine band does
+    // not, because the mesh cannot hold it.
+    float d0 = lumpRaw * binWidth * 0.030 * lumpScale
+             + waveAt(VERTEX) * binWidth * 0.016
+             + gatherAt(VERTEX) * binWidth * 0.075 * poolW;
 
     // ...and a breath. One slow cycle over about ten seconds, swelling
     // the whole body a hair — a thing that is perfectly still reads as a
@@ -131,6 +170,22 @@ void MAIN()
     float breath = 1.0 + 0.014 * sin(time * 0.62);
 
     vec3 pos = VERTEX * breath + nrm * d0;
+    // The rim's own undulation, and it DRIFTS.
+    //
+    // This used to be baked into the mesh, which made it a permanent lean
+    // — the same side always lower, frame after frame, which the eye
+    // reads as the whole thing sitting off-centre rather than as
+    // something sagging. Two harmonics turning at different rates never
+    // settle anywhere, so there is no side to favour.
+    float ang = atan(VERTEX.x, VERTEX.z + 1e-4);
+    float rimWave = sin(ang * 3.0 + time * 0.21) * 0.55
+                  + sin(ang * 5.0 - time * 0.13 + 2.3) * 0.45;
+    // Only near the top, and fading out as the rings close: the dome's
+    // apex is one point shared by every angle, and an angular offset
+    // applied there pulls it apart.
+    float rimW = smoothstep(0.55, 1.0, UV0.y)
+               * min(1.0, length(VERTEX.xz) / (binWidth * 0.15));
+    pos.y -= rimW * binWidth * 0.030 * (0.5 + 0.5 * rimWave);
     // The normal is tilted HARDER than the displacement strictly implies.
     // The body is smooth and the environment is a soft studio probe, so a
     // geometrically honest tilt moved the shading by almost nothing;

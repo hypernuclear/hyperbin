@@ -59,12 +59,12 @@ public:
     /// depth to it. When the underside was a sliver and the shoulder did
     /// all the work, the whole thing read as the brim of a hat: a thin
     /// disc with a slope on top.
-    float poolBottom() const { return m_floorY - m_binH * 0.075f; }
-    float poolCrest() const { return m_floorY - m_binH * 0.022f; }
-    float poolTop() const { return m_floorY + m_binH * 0.050f; }
+    float poolBottom() const { return m_floorY - m_binH * 0.095f; }
+    float poolCrest() const { return m_floorY - m_binH * 0.030f; }
+    float poolTop() const { return m_floorY + m_binH * 0.070f; }
     float poolRadius(float level) const
     {
-        return radiusAt(m_floorY) * (1.03f + 0.15f * level);
+        return radiusAt(m_floorY) * (1.18f + 0.34f * level);
     }
 
     float binWidth() const { return m_binW; }

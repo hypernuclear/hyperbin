@@ -82,7 +82,7 @@ public:
         /// share of maxLevel. Without a floor the ramp spends its first
         /// half producing a smear too shallow to see through a
         /// translucent bin — the effect existed but was not visible.
-        float minShare  = 0.58f;
+        float minShare  = 0.70f;
         float creepRate = 0.22f;  // level per second, filling
         float recedeRate = 0.55f; // and draining: emptying is a relief
         int   frameIntervalMs = 33;

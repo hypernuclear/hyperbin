@@ -136,7 +136,7 @@ void OozeGeometry::rebuild()
     // height the gel's outer edge rode level with the liquid and its top
     // crowded the bin's opening from either side, pinching what should
     // have been a hole the full width of the bin into a narrow lens.
-    const float collarTop = std::max(bodyTop - m_binH * 0.05f,
+    const float collarTop = std::max(bodyTop - m_binH * 0.025f,
                                      poolTop + m_binH * 0.01f);
     // How tall the rolled edge at the top is.
     const float bead = m_binH * 0.030f;
@@ -182,7 +182,11 @@ void OozeGeometry::rebuild()
         // own taper outright — the gel came out a cylinder, and a foot as
         // wide as the rim is exactly what "too fat at the bottom" means.
         const float thin = 1.0f - 0.06f * t * t;
-        push(shape.radiusAt(y) * (1.0f + 0.042f * ridgeAt(t)) * thin, y);
+        // Shallower than they were. The travelling wave in the vertex
+        // shader now bands the body as well, and the two together were
+        // corrugating it — the ledges are where the goo PAUSED, and
+        // there is no reason for them to be as deep as the flow itself.
+        push(shape.radiusAt(y) * (1.0f + 0.030f * ridgeAt(t)) * thin, y);
     }
     // The lip has to start exactly where the body stopped. Taking it from
     // radiusAt() again dropped the thinning above, so the two met with a
@@ -227,22 +231,15 @@ void OozeGeometry::rebuild()
     constexpr float kDepth = 0.86f; // the bin is a little deeper than wide
 
     const int nr = outline.size();
-    // --- sag ---------------------------------------------------------------
-    // Only the top edge varies with angle now, and only a little.
+    // A true solid of revolution, and it has to stay one.
     //
-    // There used to be a full set of harmonics modulating the radius, so
-    // the body carried vertical lobes running down it. Wrong axis: what
-    // something thick does as it runs is gather into HORIZONTAL ledges,
-    // which is the ridges above. All that is left of the angular term is
-    // enough to keep the rim from being a perfect ellipse.
-    auto foldAt = [](float a) {
-        return std::sin(a * 3.0f + 0.7f) * 0.55f
-             + std::sin(a * 5.0f + 2.3f) * 0.45f;
-    };
-    auto smoothTo = [](float a, float b, float x) {
-        const float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
-        return t * t * (3.0f - 2.0f * t);
-    };
+    // A set of angular harmonics briefly rode on the radius and the
+    // height here, so the rim dipped on one side. Baked into the mesh
+    // that is a FIXED asymmetry — the same side always lower — and a
+    // fixed asymmetry does not read as something sagging. It reads as
+    // the whole effect being mis-centred, which is exactly how it was
+    // reported. The undulation lives in the vertex shader now, where it
+    // drifts and averages out.
     struct V { QVector3D p, n; float thick, height, cap; };
     QVector<V> verts;
     QVector<quint32> idx;
@@ -260,23 +257,10 @@ void OozeGeometry::rebuild()
         const float hFrac = std::clamp((outline[j].y - poolBottom)
                                            / std::max(1.0f, bodyTop - poolBottom),
                                        0.0f, 1.0f);
-        // Nothing in the puddle: it has settled, and a puddle with
-        // vertical folds in it reads as a crumpled sheet.
-        const float bodyFrac = std::clamp((outline[j].y - poolTop)
-                                              / std::max(1.0f, bodyTop - poolTop),
-                                          0.0f, 1.0f);
-        // Strongest low down, where the goo has piled up, and easing off
-        // toward the lip — a fold is a thickness, and there is less of
-        // it to fold the higher you go.
-        // Sag fades out as the rings close at the top, or the dome's apex
-        // — one point shared by every angle — would be pulled apart.
-        const float sagW = m_binH * 0.020f * smoothTo(0.55f, 1.0f, bodyFrac)
-                         * std::min(1.0f, outline[j].r / (shape.rimRadius() * 0.45f));
         for (int i = 0; i < kU; ++i) {
             const float a = 2.0f * float(M_PI) * float(i) / kU;
-            const float f = foldAt(a);
             const float r = outline[j].r;
-            const float y = outline[j].y - sagW * (0.5f + 0.5f * f);
+            const float y = outline[j].y;
             verts[j * kU + i].p = QVector3D(r * std::sin(a), y,
                                             r * std::cos(a) * kDepth);
             verts[j * kU + i].thick = std::max(std::abs(std::cos(a)), capT * 0.9f);

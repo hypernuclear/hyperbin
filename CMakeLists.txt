@@ -60,7 +60,7 @@ if(NOT CMAKE_PREFIX_PATH)
     endif()
 endif()
 
-find_package(Qt6 6.11 QUIET COMPONENTS Core Gui Widgets Svg Qml Quick QuickControls2 ShaderTools)
+find_package(Qt6 6.11 QUIET COMPONENTS Core Gui Widgets Svg Qml Quick QuickControls2 Quick3D ShaderTools)
 if(NOT Qt6_FOUND)
     if(WIN32)
         message(FATAL_ERROR
@@ -82,7 +82,7 @@ if(NOT Qt6_FOUND)
             "have a CMakeUserPresets.json.")
     endif()
 endif()
-find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Widgets Svg Qml Quick QuickControls2 ShaderTools)
+find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Widgets Svg Qml Quick QuickControls2 Quick3D ShaderTools)
 qt_standard_project_setup(REQUIRES 6.11)
 
 qt_add_executable(hyperbin
@@ -124,8 +124,10 @@ qt_add_executable(hyperbin
     src/effects/FliesEffect.h
     src/effects/OozeEffect.cpp
     src/effects/OozeEffect.h
-    src/render/OozeMaterial.cpp
-    src/render/OozeMaterial.h
+    src/effects/OozeGeometry.cpp
+    src/effects/OozeGeometry.h
+    src/effects/OozeShape.cpp
+    src/effects/OozeShape.h
     src/render/EffectItem.cpp
     src/render/EffectItem.h
     src/render/FlyMaskMaterial.cpp
@@ -139,13 +141,11 @@ qt_add_shaders(hyperbin "hyperbin_shaders"
     FILES
         shaders/flymask.vert
         shaders/flymask.frag
-        shaders/ooze.vert
-        shaders/ooze.frag
 )
 qt_add_qml_module(hyperbin
     URI hyperbin
     VERSION 1.0
-    QML_FILES qml/Main.qml qml/BinGlyph.qml
+    QML_FILES qml/Main.qml qml/BinGlyph.qml qml/OozeVisual.qml
 )
 
 # qmltyperegistrations.cpp includes the QML_ELEMENT headers by basename,
@@ -160,12 +160,21 @@ target_include_directories(hyperbin PRIVATE
 )
 target_link_libraries(hyperbin PRIVATE
     Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg
-    Qt6::Qml Qt6::Quick Qt6::QuickControls2
+    Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Quick3D
 )
 qt_add_resources(hyperbin "hyperbin_icons"
     PREFIX "/icons"
     BASE resources
-    FILES resources/hyperbin.svg
+    FILES
+        resources/hyperbin.svg
+        resources/env.hdr
+)
+qt_add_resources(hyperbin "hyperbin_shaders3d"
+    PREFIX "/shaders3d"
+    BASE shaders
+    FILES
+        shaders/ooze3d.vert
+        shaders/ooze3d.frag
 )
 
 # Headless swarm check. No GUI, so it runs on CI and under the debugger

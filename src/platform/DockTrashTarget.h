@@ -11,7 +11,15 @@
 #include <QRect>
 #include <QTimer>
 
+class QImage;
+
 namespace hyperbin {
+
+/// The shell's own Trash artwork, at a given size. Free-standing because
+/// the preview harness needs it without a live Dock target behind it:
+/// tuning an effect against a stand-in glyph and then finding it looks
+/// wrong over the real icon is how several of these rounds were spent.
+QImage macTrashIcon(int px, bool full);
 
 class DockTrashTarget : public TrashTarget
 {

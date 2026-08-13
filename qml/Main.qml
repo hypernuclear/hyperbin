@@ -24,21 +24,33 @@ Window {
 
     color: windowedMode ? "#cfcac2"
                         : (paintDebug ? "#80ff0000" : "transparent")
-    width: 320
-    height: 320
+    width: 480
+    height: 480
     visible: windowedMode
 
-    // Stand-in for the trash icon so there's something to orbit and to
-    // judge the swarm's distance against.
+    // The bin itself, UNDER the overlay — the position the shell draws it
+    // in. Dev mode used to show only an empty outline, which was fine for
+    // judging where flies were but useless for anything that lets the bin
+    // show through itself: the ooze cuts its own top surface open so the
+    // bin can stand up out of it, and against a blank background that
+    // hole was indistinguishable from a rendering failure.
+    Image {
+        visible: windowedMode
+        source: "image://preview/bin"
+        x: flies.binRect.x
+        y: flies.binRect.y
+        width: flies.binRect.width
+        height: flies.binRect.height
+        smooth: true
+    }
     Rectangle {
         visible: windowedMode
         x: flies.binRect.x
         y: flies.binRect.y
         width: flies.binRect.width
         height: flies.binRect.height
-        radius: 6
         color: "#00000000"
-        border.color: "#7a736a"
+        border.color: "#3a7a736a"
         border.width: 1
     }
 
@@ -51,8 +63,11 @@ Window {
         // target to orbit and a clock to run on.
         Component.onCompleted: {
             if (windowedMode) {
-                binRect = Qt.rect(128, 128, 64, 64);
-                fullness = 0.6;
+                // Big, so an effect can be judged. The overlay's real
+                // margins are proportional to the icon, so this is the
+                // same geometry the Dock produces, just larger.
+                binRect = Qt.rect(90, 40, 300, 300);
+                fullness = 0.85;
                 frameIntervalMs = 16;
             }
         }

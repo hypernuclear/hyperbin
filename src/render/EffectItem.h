@@ -22,6 +22,7 @@
 #include <QImage>
 #include <QQuickItem>
 #include <QTimer>
+#include <QQmlComponent>
 #include <memory>
 
 class QSGTexture;
@@ -88,6 +89,7 @@ signals:
 protected:
     QSGNode *updatePaintNode(QSGNode *, UpdatePaintNodeData *) override;
     void releaseResources() override;
+    void geometryChange(const QRectF &newGeom, const QRectF &oldGeom) override;
 
 private:
     void tick();
@@ -105,9 +107,15 @@ private:
     /// Find where the bin's contents begin, from the artwork's own alpha.
     float detectContentLine() const;
     void applyBinState();
+    /// Create or tear down the QML visual when the effect changes.
+    void rebuildVisual();
     /// Clear the rest state — an input changed, so there is work to do.
     void wake();
 
+    /// The instantiated QML visual, for effects that draw that way.
+    /// Owned by this item as a child; null for node-based effects.
+    QQuickItem *m_visual = nullptr;
+    std::unique_ptr<QQmlComponent> m_visualComponent;
     std::unique_ptr<Effect> m_effect;
     QString       m_effectId;
     QRectF        m_binRect;

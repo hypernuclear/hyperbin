@@ -22,6 +22,8 @@
 #include <QtGlobal>
 #include <QObject>
 #include <QRectF>
+#include <QImage>
+#include <QUrl>
 #include <QVector>
 
 class QQuickWindow;
@@ -62,6 +64,12 @@ public:
     /// how, and why it works on both platforms. Effects that do not care
     /// where the rubbish sits can ignore it.
     virtual void setContentLine(float y01) { Q_UNUSED(y01); }
+    /// The bin's artwork itself, in colour.
+    ///
+    /// Node-based effects get this as a texture in updateNode() and can
+    /// ignore this. A QML-hosted effect cannot — it never sees that
+    /// texture — and the ooze needs the pixels in order to refract them.
+    virtual void setBinImage(const QImage &img) { Q_UNUSED(img); }
 
     /// Pointer position in host-item coordinates. Polled, not delivered:
     /// the overlay is click-through and never receives hover events.
@@ -103,6 +111,21 @@ public:
     virtual QMargins margins(qreal iconSize) const = 0;
 
     // --- rendering ------------------------------------------------------
+    //
+    // An effect draws one of two ways, and says which by whether it
+    // returns a visual source:
+    //
+    //   * a scene-graph NODE, built in updateNode(). Cheapest, and right
+    //     for anything 2D — the swarm is one textured quad per batch.
+    //   * a QML COMPONENT, named here. Needed for Qt Quick 3D, whose
+    //     View3D is an item subtree and cannot be expressed as a node.
+    //     The effect object itself is handed to the component as
+    //     `effect`, so the QML binds to its properties directly.
+    //
+    // Returning a source makes updateNode() irrelevant; the host hosts
+    // the component instead and never calls it.
+    /// QML component to instantiate, or empty to draw with updateNode().
+    virtual QUrl visualSource() const { return {}; }
 
     /// Build or update the scene-graph node.
     ///

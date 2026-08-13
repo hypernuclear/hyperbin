@@ -462,11 +462,16 @@ void DockTrashTarget::pollIconRect()
 
 QImage DockTrashTarget::iconImage(int px) const
 {
+    return macTrashIcon(px, m_count > 0);
+}
+
+QImage macTrashIcon(int px, bool full)
+{
     // The shell's own Trash artwork, drawn over the swarm so flies pass
     // behind the bin. Must be the named system images: iconForFile: on
     // ~/.Trash returns a generic document icon, not the trash.
-    NSImage *icon = [NSImage imageNamed:(m_count > 0 ? NSImageNameTrashFull
-                                                     : NSImageNameTrashEmpty)];
+    NSImage *icon = [NSImage imageNamed:(full ? NSImageNameTrashFull
+                                              : NSImageNameTrashEmpty)];
     if (!icon)
         return {};
 

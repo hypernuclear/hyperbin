@@ -3,6 +3,8 @@
 #include "../core/EffectRegistry.h"
 
 #include <QCursor>
+#include <QQmlContext>
+#include <QQmlEngine>
 #include <QQuickWindow>
 #include <QSGTexture>
 
@@ -80,6 +82,7 @@ void EffectItem::setEffectId(const QString &id)
             m_wasAtRest = atRest;
         });
     }
+    rebuildVisual();
     emit effectIdChanged();
     update();
 }
@@ -95,12 +98,55 @@ void EffectItem::wake()
     m_wasAtRest = false;
     emit restStateChanged(false);
 }
+void EffectItem::rebuildVisual()
+{
+    delete m_visual;
+    m_visual = nullptr;
+    m_visualComponent.reset();
+    const QUrl src = m_effect ? m_effect->visualSource() : QUrl();
+    if (src.isEmpty())
+        return;   // node-based effect; updatePaintNode does the work
+    QQmlEngine *engine = qmlEngine(this);
+    if (!engine) {
+        qWarning("hyperbin: no QML engine; cannot host %s's visual",
+                 qPrintable(m_effectId));
+        return;
+    }
+    m_visualComponent = std::make_unique<QQmlComponent>(engine, src, this);
+    if (m_visualComponent->isError()) {
+        // Loudly: a silent failure here is an effect that renders nothing
+        // and looks exactly like one that is switched off.
+        qWarning("hyperbin: %s visual failed to load: %s", qPrintable(m_effectId),
+                 qPrintable(m_visualComponent->errorString()));
+        return;
+    }
+    // The effect object goes in as `effect`, so the component binds to
+    // its properties rather than the host having to shuttle values.
+    QVariantMap props;
+    props.insert(QStringLiteral("effect"),
+                 QVariant::fromValue(static_cast<QObject *>(m_effect.get())));
+    QObject *obj = m_visualComponent->createWithInitialProperties(
+        props, qmlContext(this));
+    m_visual = qobject_cast<QQuickItem *>(obj);
+    if (!m_visual) {
+        qWarning("hyperbin: %s visual is not an Item", qPrintable(m_effectId));
+        delete obj;
+        return;
+    }
+    m_visual->setParentItem(this);
+    m_visual->setParent(this);
+    m_visual->setX(0);
+    m_visual->setY(0);
+    m_visual->setWidth(width());
+    m_visual->setHeight(height());
+}
 void EffectItem::applyBinState()
 {
     if (!m_effect)
         return;
     m_effect->setBinRect(m_binRect);
     m_effect->setFullness(float(m_fullness));
+    m_effect->setBinImage(m_binIcon);
     rebuildSurface();
 }
 
@@ -130,6 +176,8 @@ void EffectItem::setBinIcon(const QImage &img)
 {
     m_binIcon = img;
     m_binIconDirty = true;
+    if (m_effect)
+        m_effect->setBinImage(img);
     rebuildSurface();
     wake();
     update();
@@ -227,6 +275,14 @@ void EffectItem::setFrameIntervalMs(int ms)
     emit frameIntervalMsChanged();
 }
 
+void EffectItem::geometryChange(const QRectF &newGeom, const QRectF &oldGeom)
+{
+    QQuickItem::geometryChange(newGeom, oldGeom);
+    if (m_visual) {
+        m_visual->setWidth(newGeom.width());
+        m_visual->setHeight(newGeom.height());
+    }
+}
 void EffectItem::tick()
 {
     if (!m_effect)
@@ -286,6 +342,12 @@ void EffectItem::watchTick()
 
 QSGNode *EffectItem::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
 {
+    // A QML-hosted effect draws through its own item subtree, so this
+    // item contributes no geometry of its own.
+    if (m_effect && !m_effect->visualSource().isEmpty()) {
+        delete old;
+        return nullptr;
+    }
     if (!m_effect) {
         delete old;
         return nullptr;

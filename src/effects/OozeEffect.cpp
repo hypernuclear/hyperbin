@@ -1,38 +1,73 @@
 #include "OozeEffect.h"
 
-#include "../core/DistanceField.h"
-#include "../render/OozeMaterial.h"
-
-#include <QQuickWindow>
-#include <QSGGeometryNode>
-#include <QSGTexture>
+#include <QQuick3DTextureData>
+#include <cmath>
 
 namespace hyperbin {
 
-namespace {
-/// Resolution of the distance field. The coverage grid it comes from is
-/// coarse — it only has to answer "is the bin here" — but a field this
-/// one hugs a shape with, so it is resampled up and the transform run at
-/// a resolution where the taper of the bin is actually a curve.
-constexpr int kFieldSize = 128;
-/// How far, in field cells, the encoded 0..1 range covers. Only the
-/// neighbourhood of the surface matters; spending the 8 bits there is
-/// what keeps the coating's edge smooth.
-constexpr float kFieldRangeCells = 20.0f;
-} // namespace
+/// The bin's artwork, handed to Qt Quick 3D as texture data.
+///
+/// QQuick3DTextureData rather than a file or a QSGTexture: the artwork
+/// comes from the shell at runtime, changes when the bin fills or
+/// empties, and never exists on disk.
+class OozeTextureData : public QQuick3DTextureData
+{
+    Q_OBJECT
+public:
+    void setImage(const QImage &img)
+    {
+        if (img.isNull()) {
+            setTextureData({});
+            return;
+        }
+        const QImage rgba = img.convertToFormat(QImage::Format_RGBA8888);
+        setSize(rgba.size());
+        setFormat(QQuick3DTextureData::RGBA8);
+        setHasTransparency(true);
+        setTextureData(QByteArray(reinterpret_cast<const char *>(rgba.constBits()),
+                                  qsizetype(rgba.sizeInBytes())));
+    }
+};
 
 OozeEffect::OozeEffect(QObject *parent)
     : Effect(parent)
+    , m_iconTexture(new OozeTextureData)
 {
 }
 
 OozeEffect::~OozeEffect()
 {
-    delete m_fieldTex;
+    delete m_iconTexture;
+}
+QUrl OozeEffect::visualSource() const
+{
+    return QUrl(QStringLiteral("qrc:/qt/qml/hyperbin/qml/OozeVisual.qml"));
 }
 
-void OozeEffect::setBinRect(const QRectF &binRect) { m_sim.setBinRect(binRect); }
-void OozeEffect::setFullness(float fullness)       { m_sim.setFullness(fullness); }
+QObject *OozeEffect::iconTexture() const
+{
+    return m_iconTexture;
+}
+
+void OozeEffect::setBinImage(const QImage &img)
+{
+    m_iconTexture->setImage(img);
+    emit shapeChanged();
+}
+
+void OozeEffect::setBinRect(const QRectF &binRect)
+{
+    m_sim.setBinRect(binRect);
+    if (m_binRect != binRect) {
+        m_binRect = binRect;
+        m_binSize = binRect.size();
+        m_shape.measure(m_coverage, m_covW, m_covH, float(m_binSize.width()),
+                        float(m_binSize.height()));
+        emit shapeChanged();
+    }
+}
+
+void OozeEffect::setFullness(float fullness) { m_sim.setFullness(fullness); }
 
 void OozeEffect::setCursor(const QPointF &, bool)
 {
@@ -40,16 +75,34 @@ void OozeEffect::setCursor(const QPointF &, bool)
     // effect never reports itself dismissed.
 }
 
+void OozeEffect::setContentLine(float y01)
+{
+    if (qFuzzyCompare(m_contentLine, y01))
+        return;
+    m_contentLine = y01;
+    emit shapeChanged();
+}
+
 void OozeEffect::setSurface(const QVector<quint8> &coverage, int w, int h)
 {
-    m_field = buildSignedDistanceField(coverage, w, h, kFieldSize, kFieldRangeCells);
-    m_fieldRangeCells = kFieldRangeCells;
-    m_fieldDirty = true;
+    m_coverage = coverage;
+    m_covW = w;
+    m_covH = h;
+    // No distance field here any more. It existed to trim the mesh's
+    // edge against the bin's silhouette, back when the mesh was a height
+    // field that overshot it. The mesh is its own shape now — a swept
+    // profile — so the field was a 128x128 chamfer pass and a texture
+    // upload on every icon change that nothing sampled.
+    m_shape.measure(m_coverage, m_covW, m_covH, float(m_binSize.width()),
+                    float(m_binSize.height()));
+    emit shapeChanged();
 }
 
 void OozeEffect::step(float dt)
 {
     m_sim.step(dt);
+    emit frameChanged();
+
     const bool empty = isEmpty();
     if (empty != m_wasEmpty) {
         m_wasEmpty = empty;
@@ -64,89 +117,6 @@ QMargins OozeEffect::margins(qreal iconSize) const
                     x, OozeSim::marginBottom(iconSize));
 }
 
-void OozeEffect::releaseResources()
-{
-    delete m_fieldTex;
-    m_fieldTex = nullptr;
-    m_fieldDirty = true;
-}
-
-QSGNode *OozeEffect::updateNode(QSGNode *old, QQuickWindow *window,
-                                const QRectF &binRect, QSGTexture *mask)
-{
-    // `mask` is the bin's artwork in colour. It is no longer used to cut
-    // the sludge to shape — the distance field does that — but it IS what
-    // shows through the sludge, which is the whole transmission look.
-    if (m_sim.isEmpty() || binRect.isEmpty() || m_field.isNull()) {
-        delete old;
-        return nullptr;
-    }
-
-    auto *node = static_cast<QSGGeometryNode *>(old);
-    if (!node) {
-        node = new QSGGeometryNode;
-        auto *g = new QSGGeometry(QSGGeometry::defaultAttributes_Point2D(), 4);
-        g->setDrawingMode(QSGGeometry::DrawTriangleStrip);
-        node->setGeometry(g);
-        node->setFlag(QSGNode::OwnsGeometry);
-        node->setMaterial(new OozeMaterial);
-        node->setFlag(QSGNode::OwnsMaterial);
-    }
-
-    if (m_fieldDirty) {
-        m_fieldDirty = false;
-        delete m_fieldTex;
-        m_fieldTex = window->createTextureFromImage(m_field);
-        if (m_fieldTex) {
-            // Linear, and clamped: the field is smooth by construction so
-            // interpolating it is meaningful, and clamping keeps a sample
-            // just outside the icon reading as "outside" rather than
-            // wrapping to the far edge.
-            m_fieldTex->setFiltering(QSGTexture::Linear);
-            m_fieldTex->setHorizontalWrapMode(QSGTexture::ClampToEdge);
-            m_fieldTex->setVerticalWrapMode(QSGTexture::ClampToEdge);
-        }
-    }
-
-    const float icon = float(qMax(binRect.width(), binRect.height()));
-    auto *mat = static_cast<OozeMaterial *>(node->material());
-    mat->field      = m_fieldTex;
-    mat->icon       = mask;
-    mat->binRect    = binRect;
-    mat->level      = m_sim.level();
-    mat->time       = m_sim.time();
-    mat->coat       = icon * 0.045f;
-    mat->fieldRange = m_fieldRangeCells * icon / float(kFieldSize);
-    mat->dripCount  = 6;
-    mat->dripRadius = icon * 0.085f;
-    mat->dripReach  = icon * OozeSim::kDripReach;
-    mat->contentLine = m_contentLine;
-    mat->bubbleCount  = 5;
-    mat->bubbleRadius = icon * 0.055f;
-    mat->bubbleSpeed  = 0.45f;
-    mat->refraction   = icon * 0.10f;
-    mat->dispersion   = 0.35f;
-    mat->roughness    = icon * 0.030f;
-    mat->absorption   = 0.85f;
-    mat->wobble       = icon * 0.020f;
-
-    // The quad covers the icon plus the room a drip can reach below it.
-    // Sized to the effect rather than to the item, so the fragment shader
-    // is not asked about pixels no drip could ever occupy.
-    // The quad covers the icon plus exactly as far as a drip can reach —
-    // no more. The fragment shader walks every drip for every pixel it
-    // covers, so asking about pixels nothing can occupy is pure waste.
-    const QRectF area = binRect.adjusted(-mat->coat * 2, -mat->coat * 2,
-                                         mat->coat * 2,
-                                         mat->dripReach * OozeSim::kDripStretch
-                                             + mat->coat * 3);
-    auto *v = node->geometry()->vertexDataAsPoint2D();
-    v[0].set(float(area.left()),  float(area.top()));
-    v[1].set(float(area.right()), float(area.top()));
-    v[2].set(float(area.left()),  float(area.bottom()));
-    v[3].set(float(area.right()), float(area.bottom()));
-    node->markDirty(QSGNode::DirtyGeometry | QSGNode::DirtyMaterial);
-    return node;
-}
-
 } // namespace hyperbin
+
+#include "OozeEffect.moc"

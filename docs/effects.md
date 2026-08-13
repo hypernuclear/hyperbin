@@ -90,6 +90,52 @@ opaque string; `EffectRegistry` resolves an empty or unknown id to its
 default. That keeps the value store out of the renderer's dependency
 graph, which matters because `simtest` links it and must stay headless.
 
+## Looking at it
+
+Judging how an effect *looks* by screenshotting a 49-point Dock icon does
+not work: at that size the whole thing is twenty pixels tall and every
+feature worth arguing about is sub-pixel. Use the preview harness.
+
+```sh
+HYPERBIN_PREVIEW=ooze ./hyperbin --windowed          # live, big
+HYPERBIN_PREVIEW_SHOT=/tmp/a.png                     # grab, then exit
+HYPERBIN_PREVIEW_SHOT_MS=12000                       # ...at this moment
+```
+
+Two things it took several wasted rounds to learn:
+
+* **It draws the shell's own artwork**, not the app's mark. The Trash is
+  a pale translucent mesh with solid contents behind it; a clean opaque
+  glyph is a different subject entirely, and an effect tuned against one
+  can be unrecognisable over the other. The tint that looked right over
+  the glyph turned the real bin white.
+* **Two grabs at different times is the only proof an animation runs.**
+  Twice, a motion described as "subtle" turned out to be no motion at
+  all. `HYPERBIN_PREVIEW_SHOT_MS` exists for exactly that: shoot the same
+  scene half a second apart and difference the two.
+
+## Colour, if you write a Quick3D material
+
+Three things about Qt's pipeline that are not obvious and each cost a
+round of "why does it look wrong":
+
+* **A shaded material's `BASE_COLOR` is LINEAR light.** Qt's fragment
+  epilogue is `colour = tonemap(colour) * alpha`, and in the default
+  `TonemapModeLinear` the tonemap *is* a linear-to-sRGB encode. A QML
+  colour literal and an 8-bit icon are both sRGB, so they need
+  `pow(c, 2.2)` on the way in. Skip it and every midtone is encoded twice:
+  0.44 goes in and comes back 0.69, washed out and desaturated.
+* **An unshaded material's `FRAGCOLOR` is not tonemapped.** Same scene,
+  opposite rule. Measured, not assumed — write a flat 0.5 and read the
+  pixel back.
+* **Shaded output is premultiplied**, so blend with `One`, not
+  `SrcAlpha`. `SrcAlpha` multiplies by alpha a second time.
+
+And one that looks like a bug in your own maths: **alpha scales the
+diffuse term but not the specular.** A fragment taken to `alpha = 0` still
+reflects the light probe — a sheet of glass is transparent and still has a
+highlight. To make something genuinely disappear, `discard` it.
+
 ## Testing
 
 `simtest` links the simulation only, never the renderer. Keep the

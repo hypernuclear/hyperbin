@@ -6,19 +6,45 @@
 
 #include <QApplication>
 #include <QLocale>
+#include <QPainter>
+#include <QSvgRenderer>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQuickImageProvider>
 #include <QQuickWindow>
 #include <QScreen>
 #include <QTimer>
 
 #if defined(Q_OS_MACOS)
+#include "platform/DockTrashTarget.h"
 #include "platform/MacOverlay.h"
 #elif defined(Q_OS_WIN)
 #include "platform/WinOverlay.h"
 #endif
 
 using namespace hyperbin;
+namespace {
+/// Serves the preview's stand-in for the shell's trash artwork to QML, so
+/// dev mode can draw the bin underneath the overlay the way the Dock
+/// does. Dev only: nothing in the shipping path goes through this.
+class PreviewIconProvider : public QQuickImageProvider
+{
+public:
+    explicit PreviewIconProvider(QImage image)
+        : QQuickImageProvider(QQuickImageProvider::Image)
+        , m_image(std::move(image))
+    {
+    }
+    QImage requestImage(const QString &, QSize *size, const QSize &) override
+    {
+        if (size)
+            *size = m_image.size();
+        return m_image;
+    }
+private:
+    QImage m_image;
+};
+} // namespace
 
 int main(int argc, char **argv)
 {
@@ -44,8 +70,34 @@ int main(int argc, char **argv)
     PowerPolicy power;
     Settings settings;
 
+    // The bin's artwork, for dev mode only. Built before the engine loads
+    // because the preview draws it BEHIND the effect, the way the shell
+    // does — without it the overlay floats over nothing, and anything an
+    // effect cuts out of itself to let the bin show through is judged
+    // against an empty background.
+    QImage previewIcon;
+    if (windowed) {
+        // The SHELL's artwork, not our own mark. The app's glyph is a
+        // clean opaque outline; the real Trash is a translucent mesh with
+        // solid contents behind it, and an effect that reads well over
+        // the first can be unrecognisable over the second. Tuning against
+        // a stand-in cost several rounds of exactly that.
+        previewIcon = macTrashIcon(512, true);
+        if (previewIcon.isNull()) {
+            QSvgRenderer glyph(QStringLiteral(":/icons/hyperbin.svg"));
+            if (glyph.isValid()) {
+                previewIcon = QImage(512, 512, QImage::Format_ARGB32_Premultiplied);
+                previewIcon.fill(Qt::transparent);
+                QPainter p(&previewIcon);
+                p.setRenderHint(QPainter::Antialiasing, true);
+                glyph.render(&p, QRectF(40, 20, 432, 472));
+            }
+        }
+    }
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("windowedMode"), windowed);
+    engine.addImageProvider(QStringLiteral("preview"),
+                            new PreviewIconProvider(previewIcon));
     engine.loadFromModule("hyperbin", "Main");
     if (engine.rootObjects().isEmpty())
         return -1;
@@ -60,8 +112,61 @@ int main(int argc, char **argv)
     // too would fight it — the stub emits itemCountChanged(0) on start,
     // resetting fullness, and PowerPolicy would hide the window whenever
     // the bin read empty.
-    if (windowed)
+    if (windowed) {
+        // Dev harness. Iterating on how an effect LOOKS by screenshotting
+        // a 49-pixel Dock icon does not work — at that size the whole
+        // gel is twenty pixels tall and every feature worth judging is
+        // sub-pixel. This shows it at whatever size the window is, with
+        // the real bin artwork, so a change can actually be seen.
+        //
+        //   HYPERBIN_PREVIEW=ooze ./hyperbin --windowed
+        const QString preview = qEnvironmentVariable("HYPERBIN_PREVIEW");
+        if (!preview.isEmpty())
+            fx->setEffectId(preview);
+        // The SHELL's artwork, not our own mark. The app's glyph is a
+        // clean opaque outline; the real Trash is a translucent mesh with
+        // solid contents behind it, and an effect that reads well over
+        // the first can be unrecognisable over the second. Tuning against
+        // a stand-in cost several rounds of exactly that.
+        QImage icon;
+#if defined(Q_OS_MACOS)
+        icon = macTrashIcon(512, true);
+#endif
+        if (icon.isNull()) {
+            QSvgRenderer glyph(QStringLiteral(":/icons/hyperbin.svg"));
+            if (glyph.isValid()) {
+                icon = QImage(512, 512, QImage::Format_ARGB32_Premultiplied);
+                icon.fill(Qt::transparent);
+                QPainter p(&icon);
+                p.setRenderHint(QPainter::Antialiasing, true);
+                glyph.render(&p, QRectF(40, 20, 432, 472));
+            }
+        }
+        if (!icon.isNull())
+            fx->setBinIcon(icon);
+        // HYPERBIN_PREVIEW_SHOT=<path> grabs the window and exits, so a
+        // change to an effect's look can be seen without hunting for the
+        // right window on screen — which is its own source of wrong
+        // conclusions.
+        const QString shot = qEnvironmentVariable("HYPERBIN_PREVIEW_SHOT");
+        if (!shot.isEmpty()) {
+            // HYPERBIN_PREVIEW_SHOT_MS moves the grab in time. Two grabs
+            // at different moments is the only way to tell an animation
+            // that is running from one that is merely present in the
+            // shader — twice this session a "subtle" motion turned out to
+            // be no motion at all.
+            const int at = qEnvironmentVariableIntValue("HYPERBIN_PREVIEW_SHOT_MS");
+            QTimer::singleShot(at > 0 ? at : 2500, win, [win, shot] {
+                const QImage img = win->grabWindow();
+                if (img.save(shot))
+                    qInfo("hyperbin: preview written to %s", qPrintable(shot));
+                else
+                    qWarning("hyperbin: could not write %s", qPrintable(shot));
+                QCoreApplication::quit();
+            });
+        }
         return app.exec();
+    }
 
 #if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     // Click-through and above what it sits on. Must happen before the

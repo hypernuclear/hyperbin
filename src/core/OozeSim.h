@@ -64,21 +64,25 @@ public:
         /// Fullness below which nothing seeps at all. A bin with one item
         /// in it is not oozing; the effect is a warning, not a constant.
         float startAt   = 0.15f;
-        /// How far down the bin the coating reaches when the bin is full.
-        // Never all the way to the contents: some bin has to stay visible
-        // above the sludge or it reads as a green bin rather than a
-        // fouled one.
-        float maxLevel  = 0.88f;
+        /// How far up the bin the coating reaches when the bin is full.
+        ///
+        /// All the way, now. It used to stop short so that some bin
+        /// stayed visible above the sludge — otherwise the icon read as a
+        /// green bin rather than a fouled one. That job belongs to the
+        /// SHAPE now: the gel's surface is capped at the rim and the
+        /// meniscus is cut against the bin's outline, so the lip and the
+        /// contents are always visible however full it gets.
+        float maxLevel  = 1.0f;
         /// Shape of the ramp from startAt to full. Squared was too steep
         /// — a bin at 40% showed almost nothing and a full one was
         /// entirely green, so the effect was invisible for most of its
         /// range.
-        float ramp      = 1.15f;
+        float ramp      = 0.85f;
         /// Where the level starts once the bin is dirty at all, as a
         /// share of maxLevel. Without a floor the ramp spends its first
         /// half producing a smear too shallow to see through a
         /// translucent bin — the effect existed but was not visible.
-        float minShare  = 0.42f;
+        float minShare  = 0.58f;
         float creepRate = 0.22f;  // level per second, filling
         float recedeRate = 0.55f; // and draining: emptying is a relief
         int   frameIntervalMs = 33;

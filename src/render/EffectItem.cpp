@@ -83,6 +83,8 @@ void EffectItem::setEffectId(const QString &id)
         });
     }
     rebuildVisual();
+    // The new effect may want a different clock from the old one.
+    applyFrameInterval();
     emit effectIdChanged();
     update();
 }
@@ -254,14 +256,32 @@ QMargins EffectItem::margins(qreal iconSize) const
 }
 void EffectItem::setFrameIntervalMs(int ms)
 {
+    m_requestedMs = ms;
+    applyFrameInterval();
+}
+void EffectItem::applyFrameInterval()
+{
     // The policy decides whether to draw at all; the effect may ask to be
     // drawn less often when we do. Only ever slower, never faster — 0
     // still means stop.
+    //
+    // Recomputed from the REQUEST every time, and re-run whenever the
+    // effect changes. Folding the effect's floor straight into the stored
+    // interval meant it outlived the effect that asked for it: ooze wants
+    // 33ms, the policy wants 16, and the policy only signals when its own
+    // answer moves — so switching from ooze to flies left the flies
+    // running at half rate until something unrelated happened to change
+    // the power state.
+    int ms = m_requestedMs;
     if (ms > 0 && m_effect)
         ms = qMax(ms, m_effect->preferredFrameIntervalMs());
     if (ms == m_intervalMs)
         return;
     m_intervalMs = ms;
+    if (qEnvironmentVariableIsSet("HYPERBIN_DEBUG"))
+        qInfo("hyperbin: clock %dms (policy asked %d, '%s' floor %d)", ms,
+              m_requestedMs, qPrintable(m_effectId),
+              m_effect ? m_effect->preferredFrameIntervalMs() : 0);
 
     if (ms <= 0) {
         m_clock.stop();          // no timer, no wakeups, no frames

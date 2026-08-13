@@ -109,6 +109,7 @@ private:
     void applyBinState();
     /// Create or tear down the QML visual when the effect changes.
     void rebuildVisual();
+    void applyFrameInterval();
     /// Clear the rest state — an input changed, so there is work to do.
     void wake();
 
@@ -130,6 +131,11 @@ private:
     QTimer        m_clock;
     QTimer        m_watch;
     QElapsedTimer m_dt;
+    /// What the power policy last asked for, and what is actually in
+    /// force. Two numbers because the effect gets to slow the clock down
+    /// and effects can be swapped underneath it — with only the second,
+    /// a slow effect's floor outlived the effect that set it.
+    int           m_requestedMs = 0;
     int           m_intervalMs = 0;
     bool          m_wasEmpty   = true;
     bool          m_wasAtRest  = true;

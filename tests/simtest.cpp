@@ -1,6 +1,10 @@
 // Headless checks for the swarm's contract: how many flies, how long
 // they live, where they're allowed to go, and that it all stops.
 #include "FlySim.h"
+#include "DistanceField.h"
+#include <QProcess>
+#include <unistd.h>
+#include "OozeSim.h"
 #include "Settings.h"
 
 #include <QRectF>
@@ -55,8 +59,18 @@ QVector<quint8> binSilhouette(int n)
 
 } // namespace
 
-int main()
+int main(int argc, char **argv)
 {
+    // Writer half of the persistence test below: set two values and exit
+    // via _exit, so nothing is flushed by a destructor. If the settings
+    // still arrive, they were written through at the moment of the call.
+    if (argc > 1 && QString::fromLocal8Bit(argv[1]) == QStringLiteral("--write-settings")) {
+        Settings s(nullptr, QStringLiteral("hyperbin-persisttest"));
+        s.setInfestation(QStringLiteral("ooze"));
+        s.setDensity(Settings::Density::Lots);
+        _exit(0);
+    }
+
     // --- count: never more than 6, never fewer than 1 while occupied ---
     {
         FlySim s = makeSim(40, 1.0f);
@@ -585,6 +599,144 @@ int main()
         std::printf("density: thirds, relative scaling and fallback all hold\n");
     }
 
+
+    // ================= ooze ==============================================
+    // The shape and the drips live in the shader now, driven by a signed
+    // distance field of the bin. What is testable headlessly is the field
+    // itself and the coating's level — which is all this class still owns.
+    {
+        // --- the distance field ------------------------------------------
+        // Everything the ooze does hangs off this being right, and it is
+        // the one part that CAN be checked without a screen.
+        {
+            const int n = 24;
+            const QVector<quint8> cov = binSilhouette(n);
+            const float range = 20.0f;
+            const QImage f = buildSignedDistanceField(cov, n, n, 128, range);
+            if (f.isNull() || f.width() != 128)
+                return fail("no distance field produced");
+
+            auto sample = [&](double u, double v) {
+                const int x = std::clamp(int(u * f.width()), 0, f.width() - 1);
+                const int y = std::clamp(int(v * f.height()), 0, f.height() - 1);
+                return (f.constScanLine(y)[x] / 255.0 * 2.0 - 1.0) * range;
+            };
+            // Deep inside the bin is negative, well outside is positive,
+            // and the sign flips across the boundary.
+            const double inside = sample(0.5, 0.6);
+            const double above  = sample(0.5, 0.02);
+            const double beside = sample(0.02, 0.6);
+            std::printf("field: inside %.1f, above %.1f, beside %.1f (cells)\n",
+                        inside, above, beside);
+            if (inside >= 0) return fail("the field says the bin's middle is outside it");
+            if (above  <= 0) return fail("the field says above the lid is inside");
+            if (beside <= 0) return fail("the field says beside the bin is inside");
+
+            // Monotonic away from the surface: a field that is not makes
+            // the coating's edge crawl instead of sitting still.
+            double prev = -1e9;
+            bool climbs = true;
+            for (int i = 0; i < 12; ++i) {
+                const double d = sample(0.5, 0.55 - i * 0.04);
+                if (d < prev - 0.35) { climbs = false; break; }
+                prev = d;
+            }
+            if (!climbs) return fail("the field is not monotonic away from the bin");
+            std::printf("field is signed and monotonic\n");
+        }
+
+        // --- the coating's level ------------------------------------------
+        OozeSim o;
+        o.setBinRect(QRectF(500, 500, 40, 28));
+
+        // A nearly-empty bin stays clean.
+        o.setFullness(0.05f);
+        for (int i = 0; i < 400; ++i) o.step(0.05f);
+        if (!o.isEmpty()) return fail("a nearly-empty bin oozes");
+        if (!o.isAtRest()) return fail("a clean bin never rests");
+
+        // A full one gets coated, and creeps rather than snapping on.
+        o.setFullness(1.0f);
+        o.step(0.05f);
+        const float afterOneStep = o.level();
+        for (int i = 0; i < 400; ++i) o.step(0.05f);
+        const float full = o.level();
+        std::printf("coating: %.2f after one step, %.2f settled\n",
+                    afterOneStep, full);
+        if (afterOneStep >= full * 0.5f) return fail("the coating snaps on instead of creeping");
+        if (full < 0.5f) return fail("a full bin is barely coated");
+        if (o.isEmpty()) return fail("a full bin shows no ooze");
+
+        // More trash, more coating.
+        auto settled = [&](float f) {
+            OozeSim s;
+            s.setBinRect(QRectF(500, 500, 40, 28));
+            s.setFullness(f);
+            for (int i = 0; i < 600; ++i) s.step(0.05f);
+            return s.level();
+        };
+        const float half = settled(0.5f);
+        std::printf("coating level: %.2f at half, %.2f at full\n", half, full);
+        if (!(full > half * 1.15f)) return fail("the coating does not grow with the trash");
+
+        // Emptying recedes it away completely, and only then does it rest.
+        o.setFullness(0.0f);
+        int steps = 0;
+        while (!o.isEmpty() && steps < 2000) { o.step(0.05f); ++steps; }
+        std::printf("emptied: receded in %.1fs\n", steps * 0.05);
+        if (!o.isEmpty()) return fail("ooze never recedes");
+        if (steps < 4)    return fail("ooze vanishes instead of receding");
+        if (!o.isAtRest()) return fail("receded ooze never rests");
+
+        // The overlay has to be tall enough for a drip at full stretch.
+        // Nothing else can check this: the drip lives in the shader, so a
+        // margin that is too short shows as the drop being sliced off at
+        // the window edge exactly as it lets go — the one frame anyone
+        // would notice.
+        for (qreal icon : {28.0, 40.0, 95.0}) {
+            const double reach = icon * OozeSim::kDripReach * OozeSim::kDripStretch;
+            const int mb = OozeSim::marginBottom(icon);
+            std::printf("ooze %3.0fpx: drip reaches %.0f, margin %d\n",
+                        icon, reach, mb);
+            if (mb < reach)
+                return fail("the overlay is too short for a drip at full stretch");
+        }
+        // An effect that cannot rest while it is visible has to at least
+        // ask to be animated slowly — it is the only lever left on cost.
+        if (o.preferredFrameIntervalMs() < 20)
+            return fail("ooze does not ask to be slowed");
+        std::printf("ooze asks for %dms frames\n", o.preferredFrameIntervalMs());
+    }
+
+
+    // --- settings survive a restart ------------------------------------
+    // A menu-bar app is killed far more often than it is quit — the
+    // debugger's stop button, a logout, Force Quit — so "saved when we
+    // exit cleanly" is not saved at all.
+    //
+    // Run with one argument this binary acts as the WRITER half and exits
+    // without a clean shutdown; the parent then re-reads the store in a
+    // fresh process. Doing it in one process proves nothing: QSettings
+    // keeps an in-process cache, so the second read would be answered
+    // from memory whether or not anything reached the disk.
+    {
+        const QString store = QStringLiteral("hyperbin-persisttest");
+        Settings before(nullptr, store);
+        before.clearStore();
+        const QString self = QString::fromLocal8Bit(argv[0]);
+        if (QProcess::execute(self, {QStringLiteral("--write-settings")}) != 0)
+            return fail("could not run the settings writer");
+        Settings after(nullptr, store);
+        // QSettings caches per process; this one is fresh, but force a
+        // re-read anyway so the test cannot pass on a stale cache.
+        std::printf("across a restart: infestation=%s density=%d\n",
+                    qPrintable(after.infestation()), int(after.density()));
+        const bool ok = after.infestation() == QStringLiteral("ooze")
+                        && after.density() == Settings::Density::Lots;
+        after.clearStore();
+        if (!ok)
+            return fail("settings do not survive being killed");
+    }
     std::printf("PASS\n");
     return 0;
 }

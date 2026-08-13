@@ -116,8 +116,16 @@ qt_add_executable(hyperbin
     src/core/Effect.h
     src/core/EffectRegistry.cpp
     src/core/EffectRegistry.h
+    src/core/DistanceField.cpp
+    src/core/DistanceField.h
+    src/core/OozeSim.cpp
+    src/core/OozeSim.h
     src/effects/FliesEffect.cpp
     src/effects/FliesEffect.h
+    src/effects/OozeEffect.cpp
+    src/effects/OozeEffect.h
+    src/render/OozeMaterial.cpp
+    src/render/OozeMaterial.h
     src/render/EffectItem.cpp
     src/render/EffectItem.h
     src/render/FlyMaskMaterial.cpp
@@ -131,6 +139,8 @@ qt_add_shaders(hyperbin "hyperbin_shaders"
     FILES
         shaders/flymask.vert
         shaders/flymask.frag
+        shaders/ooze.vert
+        shaders/ooze.frag
 )
 qt_add_qml_module(hyperbin
     URI hyperbin
@@ -160,9 +170,11 @@ qt_add_resources(hyperbin "hyperbin_icons"
 
 # Headless swarm check. No GUI, so it runs on CI and under the debugger
 # without a display.
-add_executable(simtest tests/simtest.cpp src/core/FlySim.cpp src/app/Settings.cpp)
+add_executable(simtest tests/simtest.cpp src/core/FlySim.cpp src/core/OozeSim.cpp
+               src/core/DistanceField.cpp src/app/Settings.cpp)
 target_include_directories(simtest PRIVATE src/core src/app)
-target_link_libraries(simtest PRIVATE Qt6::Core)
+# Gui, not just Core: the distance field is a QImage. It needs no display
+target_link_libraries(simtest PRIVATE Qt6::Core Qt6::Gui)
 
 # Overlay app: no Dock icon, no menu bar. LSUIElement keeps it a
 # background agent driven from the menu-bar item.

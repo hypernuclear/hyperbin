@@ -287,8 +287,14 @@ void TrayMenu::syncFromSettings()
         for (QAction *a : g->actions())
             a->setChecked(a->data().toInt() == value);
     };
+    // An unset setting still RUNS the registry's default effect, so the
+    // menu has to show that default ticked. Showing nothing selected
+    // while flies are plainly on screen reads as a bug.
+    QString current = m_settings->infestation();
+    if (current.isEmpty() || !effects::exists(current))
+        current = effects::defaultId();
     for (QAction *a : m_effectGroup->actions())
-        a->setChecked(a->data().toString() == m_settings->infestation());
+        a->setChecked(a->data().toString() == current);
     check(m_densityGroup, int(m_settings->density()));
     check(m_thresholdGroup, int(m_settings->threshold()));
 

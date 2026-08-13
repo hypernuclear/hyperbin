@@ -1,6 +1,7 @@
 #include "EffectRegistry.h"
 
 #include "../effects/FliesEffect.h"
+#include "../effects/OozeEffect.h"
 
 namespace hyperbin::effects {
 
@@ -10,6 +11,8 @@ const QVector<EffectInfo> &all()
     static const QVector<EffectInfo> kAll = {
         { QStringLiteral("flies"), QStringLiteral("Flies"),
           [] { return std::unique_ptr<Effect>(new FliesEffect); } },
+        { QStringLiteral("ooze"), QStringLiteral("Ooze"),
+          [] { return std::unique_ptr<Effect>(new OozeEffect); } },
     };
     return kAll;
 }

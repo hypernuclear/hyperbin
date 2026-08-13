@@ -102,6 +102,8 @@ private:
     /// things on. This is what keeps "on the bin" in a simulation and
     /// "visible" on screen meaning the same thing.
     void rebuildSurface();
+    /// Find where the bin's contents begin, from the artwork's own alpha.
+    float detectContentLine() const;
     void applyBinState();
     /// Clear the rest state — an input changed, so there is work to do.
     void wake();
@@ -113,6 +115,10 @@ private:
     qreal         m_fullness     = 0.0;
     bool          m_binIconDirty = false;
     QSGTexture   *m_maskTexture  = nullptr; // bin silhouette, owned here
+    /// Which effect built the current scene-graph node. Effects each
+    /// build their own node shape and cast `old` to it, so handing one
+    /// effect's node to another is a crash — see updatePaintNode().
+    const Effect *m_nodeOwner = nullptr;
     QTimer        m_clock;
     QTimer        m_watch;
     QElapsedTimer m_dt;

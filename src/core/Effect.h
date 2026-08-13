@@ -19,6 +19,7 @@
 #pragma once
 
 #include <QMargins>
+#include <QtGlobal>
 #include <QObject>
 #include <QRectF>
 #include <QVector>
@@ -52,6 +53,16 @@ public:
     /// 0 = empty bin, 1 = as full as the settings consider full.
     virtual void setFullness(float fullness) = 0;
 
+    /// Where the bin's CONTENTS start, as a fraction of the icon's height
+    /// from its top. 0 would be the very top of the artwork; a typical
+    /// trash icon puts its rubbish somewhere around a fifth of the way
+    /// down, below the rim.
+    ///
+    /// Derived from the artwork rather than guessed — see EffectItem for
+    /// how, and why it works on both platforms. Effects that do not care
+    /// where the rubbish sits can ignore it.
+    virtual void setContentLine(float y01) { Q_UNUSED(y01); }
+
     /// Pointer position in host-item coordinates. Polled, not delivered:
     /// the overlay is click-through and never receives hover events.
     virtual void setCursor(const QPointF &pos, bool present) = 0;
@@ -60,6 +71,14 @@ public:
 
     /// Advance by `dt` seconds. Never called while isAtRest() is true.
     virtual void step(float dt) = 0;
+    /// The slowest frame interval this effect is happy with, in ms.
+    /// 0 means "whatever the power policy says".
+    ///
+    /// For an effect that genuinely never rests — ooze bubbles for as
+    /// long as there is trash — this is the only lever left on its cost.
+    /// The policy still decides whether to draw AT ALL; this only asks
+    /// for less often when it does.
+    virtual int preferredFrameIntervalMs() const { return 0; }
 
     // --- power ----------------------------------------------------------
 
@@ -85,7 +104,13 @@ public:
 
     // --- rendering ------------------------------------------------------
 
-    /// Build or update the scene-graph node. `mask` is the bin's own
+    /// Build or update the scene-graph node.
+    ///
+    /// `old` is always either null or a node THIS effect returned
+    /// earlier, so casting it back to whatever shape you built is safe.
+    /// The host discards another effect's node on a switch.
+    ///
+    /// `mask` is the bin's own
     /// artwork as a texture, for the three occlusion modes (behind the
     /// bin / clipped to it / in front); it may be null before the icon
     /// has loaded. Ownership of the returned node passes to the caller.

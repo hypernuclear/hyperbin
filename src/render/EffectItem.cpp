@@ -14,15 +14,28 @@ namespace {
 // for this and is the only wakeup the app has in that state.
 constexpr int kWatchMs = 200;
 
-// Resolution of the walkable-surface grid handed to effects. Coarse on
-// purpose: it answers "is the bin here", not "what does the bin look
-// like", and anything an effect places is bigger than one cell.
-constexpr int kCoverage = 24;
+// Resolution of the surface grid handed to effects.
+//
+// Was 24, which is ample for "is the bin here" — the question the swarm
+// asks — but the ooze builds a distance field out of it, and a field
+// measured from a 24-cell staircase renders the bin as a staircase. At 96
+// the taper of the bin is a curve. Costs one 9KB pass per icon change.
+constexpr int kCoverage = 96;
 
 // Alpha above which a pixel counts as solid bin. Matches the shader's own
 // cutoff for "the bin is here" (smoothstep 0.25..0.65 in flymask.frag)
 // closely enough that nothing is ever placed where it gets clipped.
 constexpr int kSolidAlpha = 115;
+
+// Alpha above which a pixel is the bin's CONTENTS rather than the bin.
+//
+// Both shells draw a translucent container with opaque rubbish inside it:
+// the macOS Dock trash is a grey mesh cylinder you can see through, and
+// the Windows Recycle Bin's paper sticks up out of a similar shell. So
+// "nearly opaque, inside the silhouette" is the rubbish, on both, at any
+// size and in either theme — no per-platform constant, and it tracks the
+// full/empty artwork automatically.
+constexpr int kContentAlpha = 232;
 } // namespace
 
 EffectItem::EffectItem(QQuickItem *parent)
@@ -149,6 +162,38 @@ void EffectItem::rebuildSurface()
             cov[y * kCoverage + x] = qAlpha(row[x]) > kSolidAlpha ? 1 : 0;
     }
     m_effect->setSurface(cov, kCoverage, kCoverage);
+    m_effect->setContentLine(detectContentLine());
+}
+
+float EffectItem::detectContentLine() const
+{
+    // Fallback for an unknown icon: a fifth of the way down is about
+    // where the rubbish sits in both shells' artwork.
+    constexpr float kFallback = 0.22f;
+    if (m_binIcon.isNull())
+        return kFallback;
+
+    const QImage src = m_binIcon.convertToFormat(QImage::Format_ARGB32);
+    const int w = src.width(), h = src.height();
+    if (w < 4 || h < 4)
+        return kFallback;
+
+    // The topmost row with a meaningful RUN of near-opaque pixels. A run,
+    // not a single pixel, because the rim's antialiasing and the lid's
+    // own highlight produce isolated opaque specks well above the
+    // rubbish — one stray pixel would put the fill line at the very top,
+    // which is the thing being fixed.
+    const int need = qMax(3, w / 12);
+    for (int y = 0; y < h; ++y) {
+        const QRgb *row = reinterpret_cast<const QRgb *>(src.constScanLine(y));
+        int run = 0;
+        for (int x = 0; x < w; ++x) {
+            run = qAlpha(row[x]) >= kContentAlpha ? run + 1 : 0;
+            if (run >= need)
+                return float(y) / float(h);
+        }
+    }
+    return kFallback;
 }
 
 QMargins EffectItem::margins(qreal iconSize) const
@@ -161,6 +206,11 @@ QMargins EffectItem::margins(qreal iconSize) const
 }
 void EffectItem::setFrameIntervalMs(int ms)
 {
+    // The policy decides whether to draw at all; the effect may ask to be
+    // drawn less often when we do. Only ever slower, never faster — 0
+    // still means stop.
+    if (ms > 0 && m_effect)
+        ms = qMax(ms, m_effect->preferredFrameIntervalMs());
     if (ms == m_intervalMs)
         return;
     m_intervalMs = ms;
@@ -241,6 +291,18 @@ QSGNode *EffectItem::updatePaintNode(QSGNode *old, UpdatePaintNodeData *)
         return nullptr;
     }
 
+    // Never hand one effect the node another one built.
+    //
+    // Each effect creates its own node shape and casts `old` back to it —
+    // flies use a root with three geometry children, ooze a single quad —
+    // so passing a foreign node across an effect switch reads a material
+    // that was never there. That is an immediate bad access, and it is
+    // the host's job to prevent because the host is what swapped them.
+    if (m_nodeOwner != m_effect.get()) {
+        delete old;
+        old = nullptr;
+        m_nodeOwner = m_effect.get();
+    }
     // The mask texture is built here, not in the effect: it comes from
     // the bin icon, which every effect needs and none of them owns.
     if (m_binIconDirty) {

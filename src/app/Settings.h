@@ -74,6 +74,9 @@ signals:
     void appearanceChanged();
 
 private:
+    /// Push the store to disk now. See the implementation for why every
+    /// setter does this.
+    void flush();
     QSettings m_store;
     bool      m_enabled;
     QString   m_infestation;

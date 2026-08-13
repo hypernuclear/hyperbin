@@ -50,12 +50,27 @@ Settings::Settings(QObject *parent, const QString &appName)
     m_threshold = readEnum(m_store, "threshold", Threshold::HundredMB, 3);
 }
 
+void Settings::flush()
+{
+    // Push each change to disk as it is made rather than waiting for
+    // QSettings to flush on its own schedule or on destruction.
+    //
+    // Belt and braces: on macOS the value reaches cfprefsd on setValue
+    // anyway, and a cross-process test (see simtest) shows a killed
+    // process still persists its settings without this. It matters on the
+    // kill paths where that is not guaranteed — a debugger stop, a
+    // logout — and it keeps the on-disk plist current for anything
+    // reading it from outside. Four settings, changed by hand from a
+    // menu; the cost is irrelevant.
+    m_store.sync();
+}
 void Settings::setEnabled(bool on)
 {
     if (on == m_enabled)
         return;
     m_enabled = on;
     m_store.setValue(QStringLiteral("enabled"), on);
+    flush();
     emit enabledChanged(on);
 }
 
@@ -65,6 +80,7 @@ void Settings::setInfestation(const QString &id)
         return;
     m_infestation = id;
     m_store.setValue(QStringLiteral("infestation"), id);
+    flush();
     emit infestationChanged(id);
     emit appearanceChanged();
 }
@@ -75,6 +91,7 @@ void Settings::setDensity(Density d)
         return;
     m_density = d;
     m_store.setValue(QStringLiteral("density"), int(d));
+    flush();
     emit appearanceChanged();
 }
 
@@ -84,6 +101,7 @@ void Settings::setThreshold(Threshold t)
         return;
     m_threshold = t;
     m_store.setValue(QStringLiteral("threshold"), int(t));
+    flush();
     emit appearanceChanged();
 }
 

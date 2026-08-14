@@ -190,6 +190,26 @@ Window {
                 anchors.topMargin: -panel.height * 0.06480
             }
         }
+        // The brand edge, drawn last so it sits over the artwork.
+        //
+        // A border on this Rectangle rather than on the window: the
+        // window is transparent and frameless, so there is no frame to
+        // colour. Inside the masked item, so the rounded corner cuts the
+        // border along with everything else — a border drawn outside the
+        // mask would square off the corners it is meant to trace.
+        //
+        // radius one pixel under the mask's own, because a stroke is
+        // centred on the path: at equal radii its outer half falls where
+        // the mask has already faded out, and the corner reads thinner
+        // than the straight edges.
+        Rectangle {
+            anchors.fill: parent
+            color: "transparent"
+            radius: cornerMask.radius - 1
+            border.width: 5
+            border.color: root.brandGreen
+            antialiasing: true
+        }
         // Anywhere, not a button. There is no close control on a
         // frameless window, so the whole surface has to be the way out.
     }

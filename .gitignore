@@ -6,3 +6,6 @@ CMakeUserPresets.json
 *.user.*
 CMakeLists.txt.user*
 .qtcreator
+# Python bytecode from the generator scripts.
+__pycache__/
+*.pyc

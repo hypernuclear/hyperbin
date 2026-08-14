@@ -274,6 +274,35 @@ void TrayMenu::build()
         m_settings->setThreshold(Settings::Threshold(a->data().toInt()));
     });
 
+    // --- things that open a window ------------------------------------
+    // Grouped together because they share a consequence rather than a
+    // subject: each one puts something on screen and then gets out of
+    // the way. Mixing them in with the toggles made the menu read as one
+    // undifferentiated list of eight items.
+    m_menu->addSeparator();
+
+    // Permissions. Always here once the platform needs any, not only
+    // while something is broken: a user who dismissed the window at
+    // first run, or who revoked access later, needs a way back to it, and
+    // hunting through System Settings is not one.
+    m_perms = m_menu->addAction(QString());
+    m_perms->setVisible(false);
+    connect(m_perms, &QAction::triggered, this, &TrayMenu::remediationRequested);
+    // The splash, on demand — for anyone who wants another look at the
+    // thing that went past in four seconds at login.
+    auto *splash = m_menu->addAction(QStringLiteral("Show Splash"));
+    connect(splash, &QAction::triggered, this, &TrayMenu::splashRequested);
+    // Hidden until main() says there is an updater to drive it. A build
+    // without one — Linux, or HYPERBIN_AUTO_UPDATE=OFF — never shows it.
+    m_update = m_menu->addAction(QStringLiteral("Check for Updates…"));
+    m_update->setVisible(false);
+    connect(m_update, &QAction::triggered, this, &TrayMenu::updateCheckRequested);
+
+    // --- switches that outlive this session ---------------------------
+    // Both of these change what the app does when nobody is looking —
+    // one at login, one over the network — so they sit apart from the
+    // per-session controls above and directly above Quit, where a
+    // settings group is conventionally found.
     m_menu->addSeparator();
 
     // Open at login. Hidden entirely where we have no implementation,
@@ -293,21 +322,22 @@ void TrayMenu::build()
         });
     }
 
-    // Permissions. Always here once the platform needs any, not only
-    // while something is broken: a user who dismissed the window at
-    // first run, or who revoked access later, needs a way back to it, and
-    // hunting through System Settings is not one.
-    m_perms = m_menu->addAction(QString());
-    m_perms->setVisible(false);
-    connect(m_perms, &QAction::triggered, this, &TrayMenu::remediationRequested);
-    // The splash, on demand. It shows itself once ever, which is right
-    // for an introduction and useless for anyone who wants to look at it
-    // again — so this is the way back to it.
-    auto *splash = m_menu->addAction(QStringLiteral("Show Splash"));
-    connect(splash, &QAction::triggered, this, &TrayMenu::splashRequested);
+    // Analytics, off unless switched on here. In the menu rather than
+    // behind an "Advanced" submenu: a data-collection setting the user
+    // has to go looking for is not really opt-in.
+    //
+    // Hidden on a build with no analytics backend, same reasoning as
+    // "Open at Login" above.
+    m_analytics = m_menu->addAction(QStringLiteral("Share Usage Data"));
+    m_analytics->setCheckable(true);
+    m_analytics->setVisible(false);
+    connect(m_analytics, &QAction::triggered, this, &TrayMenu::analyticsToggled);
+
+    m_menu->addSeparator();
     auto *quit = m_menu->addAction(QStringLiteral("Quit hyperbin"));
     connect(quit, &QAction::triggered, this, &TrayMenu::quitRequested);
 
+    tidySeparators();
     syncFromSettings();
 }
 
@@ -361,6 +391,53 @@ void TrayMenu::setPermissionState(int count, int missing)
     // it, which is the one thing this entry cannot afford.
     m_perms->setText(missing > 0 ? QStringLiteral("Grant Permissions \u26a0\ufe0f")
                                  : QStringLiteral("Show Permissions"));
+    tidySeparators();
+}
+void TrayMenu::tidySeparators()
+{
+    if (!m_menu)
+        return;
+    // A separator earns its place only when something visible sits on
+    // both sides of it. Walk once, hiding every separator, and un-hide
+    // one the moment a visible item turns up after it — which also
+    // takes care of leading and trailing rules for free.
+    QAction *pending = nullptr;
+    bool anyBefore = false;
+    for (QAction *a : m_menu->actions()) {
+        if (a->isSeparator()) {
+            a->setVisible(false);
+            pending = a;
+            continue;
+        }
+        if (!a->isVisible())
+            continue;
+        if (pending && anyBefore)
+            pending->setVisible(true);
+        pending = nullptr;
+        anyBefore = true;
+    }
+}
+void TrayMenu::setAnalyticsState(bool available, bool on)
+{
+    if (!m_analytics)
+        return;
+    m_analytics->setVisible(available);
+    {
+        QSignalBlocker b(m_analytics);
+        m_analytics->setChecked(on);
+    }
+    tidySeparators();
+}
+void TrayMenu::setUpdateState(bool available, bool canCheck)
+{
+    if (!m_update)
+        return;
+    m_update->setVisible(available);
+    // Greyed rather than hidden while a check runs: an entry that
+    // disappears under the cursor reads as a bug, and it comes back a
+    // second later anyway.
+    m_update->setEnabled(canCheck);
+    tidySeparators();
 }
 void TrayMenu::setProblem(const QString &text, bool actionable)
 {
@@ -368,6 +445,7 @@ void TrayMenu::setProblem(const QString &text, bool actionable)
         return;
     m_problem->setText(text);
     m_problem->setVisible(!text.isEmpty());
+    tidySeparators();
     // A greyed-out line still explains itself; it just doesn't pretend to
     // be a button when there is nothing for it to open.
     m_problem->setEnabled(actionable);

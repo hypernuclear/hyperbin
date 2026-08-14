@@ -14,6 +14,8 @@
 	<string>${MACOSX_BUNDLE_SHORT_VERSION_STRING}</string>
 	<key>CFBundleVersion</key>
 	<string>${MACOSX_BUNDLE_BUNDLE_VERSION}</string>
+	<key>CFBundleIconFile</key>
+	<string>hyperbin.icns</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 
@@ -25,5 +27,23 @@
 
 	<key>NSHighResolutionCapable</key>
 	<true/>
+
+	<!-- Sparkle. The feed is served over HTTPS and every item in it is
+	     EdDSA-signed, so a compromised CDN still cannot ship a payload
+	     this app will install. SUPublicEDKey is the public half; the
+	     private half exists only as a GitHub secret. -->
+	<key>SUFeedURL</key>
+	<string>${HYPERBIN_APPCAST_URL}</string>
+	<key>SUPublicEDKey</key>
+	<string>${HYPERBIN_EDDSA_PUBKEY}</string>
+	<!-- Checks are on, but nothing installs itself without being asked.
+	     This app has no window most of the time; an update that swapped
+	     the binary and relaunched unannounced would look like a crash. -->
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
 </dict>
 </plist>

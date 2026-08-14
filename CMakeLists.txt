@@ -12,6 +12,45 @@ if(APPLE)
     enable_language(OBJCXX)
 endif()
 
+# Auto-updater. Off for a build that must not phone home — a store
+# submission, or a distro package where the package manager owns updates.
+option(HYPERBIN_AUTO_UPDATE "Include the auto-updater (Sparkle / WinSparkle)" ON)
+
+# --- versions ---------------------------------------------------------------
+#
+# Two numbers, and they do different jobs.
+#
+# PROJECT_VERSION is the marketing version: what the splash shows, what a
+# release is called. APP_VERSION_BUILD is a monotonic commit count, and it
+# is the one the updaters actually compare. The marketing version cannot
+# do that job: CFBundleVersion has to be numeric, and two builds of the
+# same 0.1.0 would look identical to Sparkle, so a rebuild would never be
+# offered as an update. A commit count only ever goes up.
+#
+# CI passes the real value with -DAPP_VERSION_BUILD (computed on the
+# tagged commit); a local build computes the same thing here. Note the
+# CI checkout must be full-depth — `rev-list --count` on a shallow clone
+# returns 1, which would make every release look older than the last.
+find_package(Git QUIET)
+if(NOT APP_VERSION_BUILD AND GIT_FOUND)
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-list --count HEAD
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE APP_VERSION_BUILD
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+endif()
+if(NOT APP_VERSION_BUILD)
+    set(APP_VERSION_BUILD "0")
+endif()
+
+# What the user sees. CI passes the tag's version; a local build says so,
+# because "0.1.0" on a working copy that is nine commits ahead of the tag
+# is a lie that only ever surfaces in a bug report.
+if(NOT APP_VERSION_DISPLAY)
+    set(APP_VERSION_DISPLAY "${PROJECT_VERSION}-dev")
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
@@ -87,7 +126,123 @@ endif()
 find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Widgets Svg Qml Quick QuickControls2 Quick3D ShaderTools)
 qt_standard_project_setup(REQUIRES 6.11)
 
+# --- auto-update ------------------------------------------------------------
+#
+# One appcast format, one signing key, two runtimes. The public key is
+# public by construction — it ships inside every binary either way, and
+# its whole job is to be checked against a signature made with the
+# private half, which lives only in a GitHub secret. Do not put the
+# private key here, or anywhere else in this repo.
+#
+# Stable channel only. The R2 layout leaves `latest-beta/` free so a beta
+# feed can be added later without moving the stable one.
+#
+# Deliberately NOT a cache variable. `set(... CACHE ...)` does not
+# overwrite an entry that already exists, so once a build directory had
+# been configured with an empty key, adding the real one here changed
+# nothing — the stale empty value won, the plist shipped an empty
+# SUPublicEDKey, and the only symptom was an appcast that quietly came
+# out unsigned. Assigning it every configure removes that failure.
+#
+# -D still wins: a value passed on the command line lands in the cache,
+# which makes the variable truthy, and this leaves it alone.
+if(NOT HYPERBIN_EDDSA_PUBKEY)
+    set(HYPERBIN_EDDSA_PUBKEY "py1N5FJ/CxmiAkDmKJuIc6b2znpkxwb6qo3s+YC3Clg=")
+endif()
+set(HYPERBIN_CDN_URL "https://hyperbin-builds.hypernuclear.com" CACHE STRING
+    "Base URL that release artifacts are published under")
+set(HYPERBIN_APPCAST_URL "${HYPERBIN_CDN_URL}/latest/mac/appcast.xml"
+    CACHE STRING "Sparkle appcast feed URL (macOS)")
+set(HYPERBIN_APPCAST_URL_WIN "${HYPERBIN_CDN_URL}/latest/win/appcast.xml"
+    CACHE STRING "WinSparkle appcast feed URL")
+
+# An ed25519 public key is 32 bytes, which is 44 base64 characters. This
+# catches a truncated or half-selected paste, which would otherwise sail
+# through configure and surface as an unsigned appcast at release time.
+string(LENGTH "${HYPERBIN_EDDSA_PUBKEY}" _hb_key_len)
+if(HYPERBIN_AUTO_UPDATE AND NOT _hb_key_len EQUAL 44)
+    message(FATAL_ERROR
+        "HYPERBIN_EDDSA_PUBKEY is ${_hb_key_len} characters; an ed25519 public "
+        "key is 44. Check the value in CMakeLists.txt against "
+        "`generate_keys --account hyperbin -p`. See docs/distribution.md.")
+endif()
+
+# --- analytics --------------------------------------------------------------
+#
+# Opt-in, and off unless an app key was compiled in. The key is not a
+# credential — it identifies which Countly app a request belongs to and
+# ships inside every binary — but this repo is public, and a key sitting
+# in a public tree is an invitation to write junk into the dashboard. So
+# CI passes it from a secret and local builds simply have no backend.
+option(HYPERBIN_ANALYTICS "Include opt-in usage analytics (Countly)" ON)
+set(HYPERBIN_COUNTLY_APP_KEY "" CACHE STRING "Countly app key; CI passes this")
+set(HYPERBIN_COUNTLY_SERVER "https://analytics.hypernuclear.com" CACHE STRING
+    "Countly server URL")
+
+if(HYPERBIN_ANALYTICS)
+    if(NOT EXISTS "${CMAKE_SOURCE_DIR}/third_party/countly-sdk-cpp/CMakeLists.txt")
+        message(FATAL_ERROR
+            "third_party/countly-sdk-cpp is empty. Run:\n"
+            "  git submodule update --init --recursive\n"
+            "or configure with -DHYPERBIN_ANALYTICS=OFF.")
+    endif()
+    # Qt already provides HTTP and SHA-256, and this app links both. The
+    # SDK's own defaults would drag libcurl and OpenSSL into a menu-bar
+    # app for no gain.
+    set(COUNTLY_USE_CUSTOM_HTTP   ON  CACHE BOOL "" FORCE)
+    set(COUNTLY_USE_CUSTOM_SHA256 ON  CACHE BOOL "" FORCE)
+    set(COUNTLY_BUILD_TESTS       OFF CACHE BOOL "" FORCE)
+    set(COUNTLY_BUILD_SAMPLE      OFF CACHE BOOL "" FORCE)
+    # The SDK declares cmake_minimum_required(VERSION 3.0), which CMake 4
+    # refuses outright. Can't patch a submodule, so raise the floor it is
+    # allowed to ask for.
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
+    set(_hb_shared_saved ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    add_subdirectory(third_party/countly-sdk-cpp EXCLUDE_FROM_ALL)
+    set(BUILD_SHARED_LIBS ${_hb_shared_saved} CACHE BOOL "" FORCE)
+endif()
+
+set(HYPERBIN_UPDATE_SOURCES src/update/AppUpdater.h)
+if(HYPERBIN_AUTO_UPDATE AND APPLE)
+    include(FetchContent)
+    set(SPARKLE_VERSION "2.9.0")
+    FetchContent_Declare(sparkle
+        URL "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    FetchContent_MakeAvailable(sparkle)
+    set(SPARKLE_FRAMEWORK_DIR "${sparkle_SOURCE_DIR}")
+    list(APPEND HYPERBIN_UPDATE_SOURCES
+        src/update/SparkleUpdater.h
+        src/update/SparkleUpdater.mm)
+elseif(HYPERBIN_AUTO_UPDATE AND WIN32)
+    include(FetchContent)
+    set(WINSPARKLE_VERSION "0.9.2")
+    FetchContent_Declare(winsparkle
+        URL "https://github.com/vslavik/winsparkle/releases/download/v${WINSPARKLE_VERSION}/WinSparkle-${WINSPARKLE_VERSION}.zip"
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    FetchContent_MakeAvailable(winsparkle)
+    list(APPEND HYPERBIN_UPDATE_SOURCES
+        src/update/WinSparkleUpdater.h
+        src/update/WinSparkleUpdater.cpp)
+else()
+    list(APPEND HYPERBIN_UPDATE_SOURCES src/update/NoUpdater.cpp)
+endif()
+
+set(HYPERBIN_ANALYTICS_SOURCES src/analytics/Analytics.h)
+if(HYPERBIN_ANALYTICS)
+    list(APPEND HYPERBIN_ANALYTICS_SOURCES
+        src/analytics/CountlyAnalytics.h
+        src/analytics/CountlyAnalytics.cpp
+        src/analytics/MachineId.h
+        src/analytics/MachineId.cpp)
+else()
+    list(APPEND HYPERBIN_ANALYTICS_SOURCES src/analytics/NoAnalytics.cpp)
+endif()
+
 qt_add_executable(hyperbin
+    ${HYPERBIN_UPDATE_SOURCES}
+    ${HYPERBIN_ANALYTICS_SOURCES}
     src/main.cpp
     src/app/Settings.cpp
     src/app/Settings.h
@@ -159,7 +314,24 @@ qt_add_qml_module(hyperbin
 # qmltyperegistrations.cpp includes the QML_ELEMENT headers by basename,
 # so their directories have to be on the include path, not just src/.
 # The version reaches the UI as a compile definition rather than being
-target_compile_definitions(hyperbin PRIVATE HYPERBIN_VERSION="${PROJECT_VERSION}")
+# read back out of the bundle: on Windows there is no bundle to read.
+target_compile_definitions(hyperbin PRIVATE
+    HYPERBIN_VERSION="${APP_VERSION_DISPLAY}"
+    HYPERBIN_VERSION_BUILD="${APP_VERSION_BUILD}")
+if(HYPERBIN_AUTO_UPDATE)
+    # macOS reads both of these from Info.plist; Windows has no plist, so
+    # WinSparkle is told at runtime and needs them compiled in.
+    target_compile_definitions(hyperbin PRIVATE
+        HYPERBIN_AUTO_UPDATE
+        HYPERBIN_APPCAST_URL="${HYPERBIN_APPCAST_URL_WIN}"
+        HYPERBIN_EDDSA_PUBKEY="${HYPERBIN_EDDSA_PUBKEY}")
+endif()
+if(HYPERBIN_ANALYTICS)
+    target_link_libraries(hyperbin PRIVATE countly Qt6::Network)
+    target_compile_definitions(hyperbin PRIVATE
+        HYPERBIN_COUNTLY_APP_KEY="${HYPERBIN_COUNTLY_APP_KEY}"
+        HYPERBIN_COUNTLY_SERVER="${HYPERBIN_COUNTLY_SERVER}")
+endif()
 target_include_directories(hyperbin PRIVATE
     src
     src/app
@@ -167,6 +339,8 @@ target_include_directories(hyperbin PRIVATE
     src/effects
     src/render
     src/platform
+    src/update
+    src/analytics
 )
 target_link_libraries(hyperbin PRIVATE
     Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg
@@ -208,15 +382,59 @@ if(APPLE)
     set_target_properties(hyperbin PROPERTIES
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_GUI_IDENTIFIER com.hypernuclear.hyperbin
-        MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
+        # Sparkle compares CFBundleVersion, so it gets the build number.
+        # CFBundleShortVersionString is the one people read.
+        MACOSX_BUNDLE_BUNDLE_VERSION ${APP_VERSION_BUILD}
         MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
+        MACOSX_BUNDLE_ICON_FILE hyperbin.icns
     )
+    # LSUIElement keeps this out of the Dock, so the icon is for Finder,
+    # the DMG, and the update dialog Sparkle puts up — all places where a
+    # generic bundle icon looks like something went wrong.
+    target_sources(hyperbin PRIVATE resources/hyperbin.icns)
+    set_source_files_properties(resources/hyperbin.icns PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources")
     target_link_libraries(hyperbin PRIVATE
         "-framework AppKit"
         "-framework ApplicationServices"
         # SMAppService — registers the app in System Settings > Login Items.
         "-framework ServiceManagement"
     )
+
+    if(HYPERBIN_AUTO_UPDATE)
+        target_compile_options(hyperbin PRIVATE
+            "-F${SPARKLE_FRAMEWORK_DIR}")
+        target_link_libraries(hyperbin PRIVATE
+            "-F${SPARKLE_FRAMEWORK_DIR}" "-framework Sparkle")
+        set_source_files_properties(src/update/SparkleUpdater.mm PROPERTIES
+            COMPILE_FLAGS "-fobjc-arc")
+        # Sparkle ships as a framework and has to travel inside the
+        # bundle, with the loader pointed at it. Copied at build time so
+        # a locally built .app updates like a shipped one; without this
+        # it launches on the developer's machine and nowhere else.
+        #
+        # ditto, not `cmake -E copy_directory`: a versioned framework is
+        # a Versions/ directory plus a set of symlinks into it, and
+        # copy_directory follows those symlinks and writes real copies.
+        # The result still launches, so it looks fine — and then
+        # codesign refuses the bundle with "bundle format is ambiguous
+        # (could be app or framework)", because a framework whose
+        # Versions/Current is a real directory is not a shape it
+        # recognises. ditto preserves the links.
+        add_custom_command(TARGET hyperbin POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "$<TARGET_BUNDLE_CONTENT_DIR:hyperbin>/Frameworks"
+            COMMAND ${CMAKE_COMMAND} -E rm -rf
+                    "$<TARGET_BUNDLE_CONTENT_DIR:hyperbin>/Frameworks/Sparkle.framework"
+            COMMAND ditto
+                    "${SPARKLE_FRAMEWORK_DIR}/Sparkle.framework"
+                    "$<TARGET_BUNDLE_CONTENT_DIR:hyperbin>/Frameworks/Sparkle.framework"
+            COMMENT "Copying Sparkle.framework into the bundle"
+            VERBATIM)
+        set_target_properties(hyperbin PROPERTIES
+            BUILD_RPATH "@executable_path/../Frameworks"
+            INSTALL_RPATH "@executable_path/../Frameworks")
+    endif()
 
     # Sign with a STABLE identity, even for local dev builds.
     #
@@ -240,6 +458,9 @@ if(APPLE)
         MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/Info.plist.in)
 elseif(WIN32)
     set_target_properties(hyperbin PROPERTIES WIN32_EXECUTABLE TRUE)
+    # Windows takes the executable's icon from a resource compiled in,
+    # not from a file beside it.
+    target_sources(hyperbin PRIVATE packaging/windows/hyperbin.rc)
     # shell32/ole32/uuid: the desktop shell view and the Recycle Bin's own
     # artwork. gdi32: turning that artwork's HBITMAP into a QImage.
     # dwmapi: DWMWA_CLOAKED, which is how a window that is "visible" but
@@ -248,4 +469,31 @@ elseif(WIN32)
     # become Qt's device-independent ones on a mixed-DPI desktop.
     target_link_libraries(hyperbin PRIVATE
         shell32 user32 ole32 oleaut32 uuid shlwapi gdi32 dwmapi advapi32 shcore)
+
+    if(HYPERBIN_AUTO_UPDATE)
+        # WinSparkle ships prebuilt, one directory per architecture.
+        if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+            if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|arm64|aarch64")
+                set(WINSPARKLE_ARCH "arm64")
+            else()
+                set(WINSPARKLE_ARCH "x64")
+            endif()
+        else()
+            set(WINSPARKLE_ARCH "x86")
+        endif()
+        target_include_directories(hyperbin PRIVATE
+            "${winsparkle_SOURCE_DIR}/include")
+        target_link_directories(hyperbin PRIVATE
+            "${winsparkle_SOURCE_DIR}/${WINSPARKLE_ARCH}/Release")
+        target_link_libraries(hyperbin PRIVATE WinSparkle)
+        # The DLL has to sit beside the exe both in the build tree and in
+        # whatever the installer stages, or the app dies at load time
+        # with no message a user could act on.
+        add_custom_command(TARGET hyperbin POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${winsparkle_SOURCE_DIR}/${WINSPARKLE_ARCH}/Release/WinSparkle.dll"
+                    "$<TARGET_FILE_DIR:hyperbin>"
+            COMMENT "Copying WinSparkle.dll beside the executable"
+            VERBATIM)
+    endif()
 endif()

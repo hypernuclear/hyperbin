@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Deliberately short.
+
+	     Not sandboxed: the whole app is a read of the user's Trash and a
+	     borderless window over the Dock, and neither survives the
+	     sandbox. Full Disk Access is what gates the read instead, and
+	     that is a TCC grant rather than an entitlement.
+
+	     Everything below exists for Sparkle. A hardened-runtime app
+	     needs to be allowed to relaunch itself after the updater swaps
+	     the binary, which is an Apple Event to itself. -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+</dict>
+</plist>

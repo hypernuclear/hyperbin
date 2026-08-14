@@ -1,0 +1,7 @@
+// The executable's icon. Windows reads this out of the binary itself,
+// so an .ico sitting next to the .exe would do nothing.
+//
+// IDI_ICON1 by convention: the shell shows the lowest-numbered icon
+// resource, and giving it the name every other Windows app uses avoids
+// surprises with tooling that looks for exactly that.
+IDI_ICON1 ICON "../../resources/hyperbin.ico"

@@ -1,0 +1,111 @@
+name: preflight
+
+# Checks the release credentials without doing a release.
+#
+# A tag build spends ten-plus minutes compiling, signing and notarizing
+# before it ever reaches the R2 upload, so a wrong bucket scope or a
+# mistyped secret surfaces at the most expensive possible moment. This
+# runs the same checks in about a minute.
+#
+# workflow_dispatch only. Never on pull_request: this repo is public,
+# and a workflow that touches release credentials should not be
+# reachable by anything a stranger can trigger.
+on:
+  workflow_dispatch:
+
+env:
+  R2_BUCKET: hyperbin-builds
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      # Presence only — never a value, not even a prefix or a length.
+      # Actions masks secrets in logs, but this repo's logs are public
+      # and "the masking held" is not something worth betting a signing
+      # certificate on.
+      - name: Are the secrets present
+        env:
+          APPLE_DEVELOPER_ID_CERT_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERT_BASE64 }}
+          APPLE_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
+          APPLE_NOTARIZATION_APPLE_ID: ${{ secrets.APPLE_NOTARIZATION_APPLE_ID }}
+          APPLE_NOTARIZATION_PASSWORD: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
+          APPLE_NOTARIZATION_TEAM_ID: ${{ secrets.APPLE_NOTARIZATION_TEAM_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_APPLICATION_ID: ${{ secrets.AZURE_APPLICATION_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          AZURE_CERT_PROFILE: ${{ secrets.AZURE_CERT_PROFILE }}
+          CLOUDFLARE_R2_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          CLOUDFLARE_R2_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_R2_ENDPOINT: ${{ secrets.CLOUDFLARE_R2_ENDPOINT }}
+          COUNTLY_APP_KEY: ${{ secrets.COUNTLY_APP_KEY }}
+          SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
+        run: |
+          missing=0
+          for name in \
+            APPLE_DEVELOPER_ID_CERT_BASE64 APPLE_DEVELOPER_ID_CERT_PASSWORD \
+            APPLE_NOTARIZATION_APPLE_ID APPLE_NOTARIZATION_PASSWORD \
+            APPLE_NOTARIZATION_TEAM_ID \
+            AZURE_TENANT_ID AZURE_APPLICATION_ID AZURE_CLIENT_SECRET \
+            AZURE_SIGNING_ACCOUNT AZURE_CERT_PROFILE \
+            CLOUDFLARE_R2_ACCESS_KEY_ID CLOUDFLARE_R2_SECRET_ACCESS_KEY \
+            CLOUDFLARE_R2_ENDPOINT COUNTLY_APP_KEY SPARKLE_EDDSA_PRIVATE_KEY
+          do
+            if [ -z "${!name}" ]; then
+              echo "  MISSING  $name"
+              missing=$((missing + 1))
+            else
+              echo "  present  $name"
+            fi
+          done
+          echo
+          if [ "$missing" -gt 0 ]; then
+            echo "::error::$missing secret(s) missing or empty."
+            echo "A secret set as a repository *Variable* also reads as empty here —"
+            echo "the workflow references secrets.*, so the two are not interchangeable."
+            exit 1
+          fi
+
+      # The check this exists for. A token scoped to another bucket
+      # authenticates perfectly and then fails on the first write, so
+      # listing is not enough — this does a real round trip.
+      - name: Can we actually write to the bucket
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.CLOUDFLARE_R2_ENDPOINT }}
+        run: |
+          S3="aws s3 --endpoint-url $R2_ENDPOINT"
+          KEY="_preflight/${{ github.run_id }}.txt"
+          echo "preflight ${{ github.run_id }}" > probe.txt
+
+          echo "--- list ---"
+          if ! $S3 ls "s3://${R2_BUCKET}/" >/dev/null 2>err.txt; then
+            echo "::error::cannot list s3://${R2_BUCKET}/"
+            sed 's/^/    /' err.txt
+            echo "  AccessDenied here usually means the R2 token is scoped to a"
+            echo "  different bucket. Cloudflare > R2 > Manage API tokens."
+            exit 1
+          fi
+          echo "  ok"
+
+          echo "--- write ---"
+          if ! $S3 cp probe.txt "s3://${R2_BUCKET}/${KEY}" >/dev/null 2>err.txt; then
+            echo "::error::cannot write to s3://${R2_BUCKET}/"
+            sed 's/^/    /' err.txt
+            echo "  The token can read but not write. It needs Object Read AND"
+            echo "  Write on ${R2_BUCKET}."
+            exit 1
+          fi
+          echo "  ok"
+
+          echo "--- clean up ---"
+          # Best effort. A probe file left behind is untidy but harmless,
+          # and it lives under _preflight/ where nothing else looks.
+          $S3 rm "s3://${R2_BUCKET}/${KEY}" >/dev/null 2>&1 \
+            && echo "  ok" \
+            || echo "  WARNING: could not delete ${KEY} (delete permission?)"
+
+          echo
+          echo "R2 is good: ${R2_BUCKET} is listable and writable."

@@ -43,16 +43,38 @@ public:
     /// offering a window listing nothing.
     void setPermissionState(int count, int missing);
 
+    /// Show the "Check for Updates" entry, and whether it can be used
+    /// right now. Never called on a build without an updater, which
+    /// leaves the entry hidden — an update check that cannot happen is
+    /// worse than no menu item.
+    void setUpdateState(bool available, bool canCheck);
+
+    /// Show the analytics switch, and where it currently sits. Hidden on
+    /// a build with no analytics backend.
+    void setAnalyticsState(bool available, bool on);
+
 signals:
     void quitRequested();
     /// The problem line, or the permissions entry, was clicked.
     void remediationRequested();
     /// "Show Splash" was chosen.
     void splashRequested();
+    /// "Check for Updates…" was chosen.
+    void updateCheckRequested();
+    /// "Share Usage Data" was ticked or unticked.
+    void analyticsToggled(bool on);
 
 private:
     void build();
     void syncFromSettings();
+    /// Hide separators that have nothing left to separate.
+    ///
+    /// Most entries here can be absent — no analytics backend, no
+    /// login-item support, no permissions to grant, no updater — and a
+    /// separator does not disappear just because everything around it
+    /// did. Without this, a Linux build shows a rule floating above Quit
+    /// with an empty group above it. Re-run whenever visibility changes.
+    void tidySeparators();
     /// The template icon, rendered from the bundled SVG. Menu-bar icons
     /// are monochrome masks on macOS, so the SVG's colour is irrelevant
     /// and only its silhouette matters.
@@ -69,6 +91,8 @@ private:
     QAction      *m_status    = nullptr;
     QAction      *m_problem   = nullptr;
     QAction      *m_perms     = nullptr;
+    QAction      *m_update    = nullptr;
+    QAction      *m_analytics = nullptr;
     QActionGroup *m_effectGroup = nullptr;
     QActionGroup *m_densityGroup   = nullptr;
     QActionGroup *m_thresholdGroup = nullptr;

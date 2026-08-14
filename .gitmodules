@@ -1,0 +1,4 @@
+[submodule "third_party/countly-sdk-cpp"]
+	path = third_party/countly-sdk-cpp
+	url = https://github.com/Countly/countly-sdk-cpp.git
+	branch = master

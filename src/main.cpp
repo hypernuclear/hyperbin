@@ -3,6 +3,8 @@
 #include "core/PowerPolicy.h"
 #include "platform/TrashTarget.h"
 #include "render/EffectItem.h"
+#include "update/AppUpdater.h"
+#include "analytics/Analytics.h"
 
 #include <QApplication>
 #include <QLocale>
@@ -15,6 +17,7 @@
 #include <QQuickImageProvider>
 #include <QQuickWindow>
 #include <QScreen>
+#include <QSysInfo>
 #include <QTimer>
 
 #if defined(Q_OS_MACOS)
@@ -570,6 +573,72 @@ int main(int argc, char **argv)
     // Asked for, so it waits to be dismissed rather than timing out.
     QObject::connect(&tray, &TrayMenu::splashRequested, &app,
                      [&] { showSplash(0); });
+
+    // --- updates ----------------------------------------------------------
+    // Null on a platform with no updater, or a build made without one.
+    // That is a supported configuration rather than a failure: the menu
+    // entry stays hidden and nothing else changes.
+    //
+    // Parented to `app`, so the updater outlives every window and is torn
+    // down last — Sparkle's controller wants to still exist when the
+    // installer relaunches us.
+    AppUpdater *updater = AppUpdater::create(&app);
+    if (updater) {
+        tray.setUpdateState(true, updater->canCheckForUpdates());
+        QObject::connect(updater, &AppUpdater::canCheckForUpdatesChanged, &tray,
+                         [&tray](bool can) { tray.setUpdateState(true, can); });
+        QObject::connect(&tray, &TrayMenu::updateCheckRequested, updater,
+                         &AppUpdater::checkForUpdates);
+        updater->setAutomaticChecksEnabled(true);
+    }
+
+    // --- analytics --------------------------------------------------------
+    // Null when no app key was compiled in, which is every local build.
+    // Opt-in: created here, but it sends nothing at all until the menu
+    // switch is turned on, and the switch starts off.
+    Analytics *analytics = Analytics::create(&app);
+    if (analytics) {
+        tray.setAnalyticsState(true, analytics->enabled());
+        QObject::connect(&tray, &TrayMenu::analyticsToggled, analytics,
+                         [analytics](bool on) { analytics->setEnabled(on); });
+        // Describe the install once it is allowed to be described, which
+        // is both at startup (if already opted in) and at the moment
+        // somebody opts in mid-session.
+        auto describe = [analytics, &settings] {
+            analytics->property(Prop::kVersion, QStringLiteral(HYPERBIN_VERSION));
+            analytics->property(Prop::kOs, QSysInfo::productType());
+            analytics->property(Prop::kOsVersion, QSysInfo::productVersion());
+            analytics->property(Prop::kEffect, settings.infestation());
+            analytics->event(Ev::kLaunch);
+        };
+        QObject::connect(analytics, &Analytics::enabledChanged, &app,
+                         [describe](bool on) { if (on) describe(); });
+        if (analytics->enabled())
+            describe();
+
+        // Which effect people actually pick, and how they tune it. All
+        // of this is a no-op while opted out — the checks live in the
+        // service, so there is no path where a caller has to remember.
+        QObject::connect(&settings, &Settings::infestationChanged, analytics,
+                         [analytics](const QString &id) {
+                             analytics->event(Ev::kEffect, {{"effect", id}});
+                             analytics->property(Prop::kEffect, id);
+                         });
+        QObject::connect(&settings, &Settings::enabledChanged, analytics,
+                         [analytics](bool on) {
+                             analytics->event(Ev::kEnabled,
+                                              {{"on", on ? "1" : "0"}});
+                         });
+        // Emptying the bin is the thing the app is nagging about, so it
+        // is the one number worth having. A count, never a content.
+        QObject::connect(target.get(), &TrashTarget::itemCountChanged, analytics,
+                         [analytics, prev = -1](int n) mutable {
+                             const int was = prev;
+                             prev = n;
+                             if (was > 0 && n == 0)
+                                 analytics->event(Ev::kEmptied);
+                         });
+    }
 
     // --- master switch ----------------------------------------------------
     // Off means genuinely off: no frames, no overlay surface, and the

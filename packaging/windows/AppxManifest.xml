@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap10 rescap">
+
+  <!--
+    MSIX manifest for hyperbin.
+
+    {{VERSION}} and {{ARCH}} are substituted by CI before packaging.
+    Publisher must match the Subject of the signing certificate exactly,
+    character for character — makeappx will pack a mismatched one
+    happily and Windows will refuse to install it.
+  -->
+
+  <Identity
+    Name="Hypernuclear.Hyperbin"
+    Publisher="CN=hypernuclear, O=hypernuclear, L=Henderson, S=Nevada, C=US"
+    Version="{{VERSION}}.0"
+    ProcessorArchitecture="{{ARCH}}" />
+
+  <Properties>
+    <DisplayName>hyperbin</DisplayName>
+    <PublisherDisplayName>Hypernuclear LLC</PublisherDisplayName>
+    <Description>Animates the Recycle Bin as it fills up.</Description>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop"
+                        MinVersion="10.0.19041.0"
+                        MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <Application
+      Id="Hyperbin"
+      Executable="hyperbin.exe"
+      EntryPoint="Windows.FullTrustApplication"
+      uap10:RuntimeBehavior="packagedClassicApp"
+      uap10:TrustLevel="mediumIL">
+      <uap:VisualElements
+        DisplayName="hyperbin"
+        Description="Animates the Recycle Bin as it fills up"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <!-- A Qt desktop app reading the shell's Recycle Bin. None of that
+         is expressible as a sandboxed capability. -->
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+
+</Package>

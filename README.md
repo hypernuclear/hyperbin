@@ -24,7 +24,8 @@ how full the bin has to be before anything happens, whether to run at
 all, and open-at-login.
 
 See `docs/architecture.md` for the decisions, `docs/effects.md` for the
-contract a new effect implements, and `docs/battery.md` for the power
+contract a new effect implements, `docs/distribution.md` for signing,
+updates and the release secrets, and `docs/battery.md` for the power
 budget.
 
 ## The effects
@@ -104,6 +105,11 @@ This repo is public. `gitleaks` runs in two places:
 If something is caught, **rotate the credential first**. Removing it from
 the diff does nothing for a value that was already pushed — it stays in
 the history and must be treated as compromised.
+Release credentials — Apple signing, the Sparkle key, Azure, R2, the
+Countly app key — are GitHub Actions secrets and are listed in
+[docs/distribution.md](docs/distribution.md). None of them belong in the
+tree, and a build without them still compiles: it simply has no updater
+backend, no analytics backend, and an ad-hoc signature.
 
 ## Running it
 
@@ -248,8 +254,13 @@ src/effects/    one directory per effect's implementation
 src/platform/   the ~20% that differs: TrashTarget + overlay surface
 src/render/     EffectItem, the host that clocks an effect and hands it
                 the bin's geometry, artwork and silhouette
+src/update/     Sparkle (macOS) and WinSparkle (Windows), behind one
+                AppUpdater interface; a null one everywhere else
+src/analytics/  opt-in Countly reporting, behind one Analytics interface
+packaging/      Windows installer + MSIX manifest, macOS DMG artwork
 shaders/        fly mask (baked .qsb) and the ooze's Quick3D snippets
 qml/            tray glyph and the ooze's Quick3D scene
-docs/           architecture, the effect contract, battery, Windows
+docs/           architecture, the effect contract, battery, Windows,
+                distribution
 ```
 

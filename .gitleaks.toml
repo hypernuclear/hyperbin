@@ -10,6 +10,7 @@ description = "Paths and strings that are not secrets"
 paths = [
   '''^build/''',
   '''\.gitleaks\.toml$''',
+  '''^third_party/''',
 ]
 
 # The Team ID is deliberately public: it's embedded in every signed
@@ -18,4 +19,5 @@ paths = [
 regexes = [
   '''67J6LGVJDP''',
   '''Developer ID Application: Hypernuclear LLC''',
+  '''SUPublicEDKey''',
 ]

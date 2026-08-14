@@ -33,6 +33,61 @@ DMG="$BUILD_DIR/hyperbin-${VERSION}-macos-${ARCH}.dmg"
 
 [ -d "$APP" ] || { echo "no bundle at $APP — build first" >&2; exit 1; }
 
+# --- is the bundle actually current? ---------------------------------------
+#
+# This script signs and packages. It does NOT compile, and that has
+# already shipped a wrong DMG once: the icon was regenerated, the bundle
+# still held the previous .icns, and the disk image looked perfectly
+# valid while carrying a stale asset. Nothing downstream catches it —
+# the signature is over whatever is there.
+#
+# So refuse to package a bundle older than its own inputs. CI always
+# builds immediately before this, so it only ever fires locally, which is
+# exactly where the mistake is possible.
+# Compared against the newest file anywhere in the bundle, not against
+# the executable: changing a resource copies a new file in without
+# relinking, so anchoring on the binary reports every resource edit as
+# stale forever, even straight after a successful build.
+# `awk NR==1` rather than `head -1`: head exits after the first line, the
+# writer upstream takes SIGPIPE, and under `set -o pipefail` that is a
+# 141 that `set -e` turns into a silent abort of the whole script. awk
+# drains the stream, so the pipeline exits 0.
+newest() {
+    find "$@" -type f -exec stat -f '%m %N' {} + 2>/dev/null | sort -rn | awk 'NR==1'
+}
+APP_NEWEST=$(newest "$APP")
+SRC_NEWEST=$(newest "$REPO_ROOT/src" "$REPO_ROOT/qml" "$REPO_ROOT/resources" \
+                    "$REPO_ROOT/shaders")
+if [ "${SRC_NEWEST%% *}" -gt "${APP_NEWEST%% *}" ] 2>/dev/null; then
+    echo "ERROR: $APP is older than ${SRC_NEWEST#* }" >&2
+    echo "       This script packages; it does not build." >&2
+    echo "       Run:  cmake --build $BUILD_DIR" >&2
+    exit 1
+fi
+
+# --- clear stale mounts ----------------------------------------------------
+#
+# create-dmg drives Finder with AppleScript that addresses the volume by
+# NAME. With /Volumes/hyperbin already taken, the new image mounts as
+# "hyperbin 1", the script talks to the wrong volume, and the run hangs
+# until something kills it. A killed run then leaves its own scratch
+# image attached — with the backing file already unlinked — so the next
+# one inherits the mess.
+for vol in /Volumes/hyperbin /Volumes/hyperbin\ *; do
+    [ -d "$vol" ] || continue
+    echo "detaching stale volume: $vol"
+    hdiutil detach "$vol" -force -quiet 2>/dev/null || true
+done
+# Orphaned create-dmg scratch mounts — but only ones backed by an image
+# in THIS build directory. Never somebody else's disk image.
+hdiutil info | awk '
+    /^image-path/  { p = $0; sub(/^image-path[ \t]*:[ \t]*/, "", p) }
+    /^\/dev\/disk/ { if ($NF ~ "^/Volumes/" && p ~ "/rw\\..*hyperbin.*\\.dmg$") print $NF }
+' | while IFS= read -r m; do
+    echo "detaching orphaned scratch mount: $m"
+    hdiutil detach "$m" -force -quiet 2>/dev/null || true
+done
+
 # --- Qt --------------------------------------------------------------------
 # macdeployqt copies the Qt frameworks and QML modules in. It runs before
 # signing, because it rewrites the very binaries that get signed.
@@ -48,7 +103,7 @@ fi
 IDENTITY="${CODESIGN_IDENTITY:-}"
 if [ -z "$IDENTITY" ]; then
     IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
-               | grep "Developer ID Application" | head -1 \
+               | grep "Developer ID Application" | awk 'NR==1' \
                | grep -o '"[^"]*"' | tr -d '"' || true)
 fi
 
@@ -115,7 +170,7 @@ create-dmg \
     --icon "hyperbin.app" 165 185 \
     --hide-extension "hyperbin.app" \
     --app-drop-link 495 185 \
-    --background "$REPO_ROOT/packaging/macos/dmg-background.png" \
+    --background "$REPO_ROOT/packaging/macos/dmg-background.tiff" \
     --no-internet-enable \
     "$DMG" "$STAGE" || true
 

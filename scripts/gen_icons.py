@@ -26,13 +26,32 @@ import shutil
 
 MASTER = 'resources/app_icon.png'
 
-# The brand edge, matching the splash's.
+# The brand edge around the icon.
 #
-# Held as a FRACTION of the side, not a pixel count: the splash's 5px sits
-# on a 640-wide window, and the same 5px on a 1024px master would be a
-# quarter of the weight. 0.0078 is that 5/640 carried across.
-BORDER_FRACTION = 5 / 640
+# Held as a FRACTION of the side, not a pixel count: the splash's 5px
+# sits on a 640-wide window, and the same 5px on a 1024px master would be
+# a quarter of the weight.
+#
+# 1.5%, not the splash's 5/640 (0.78%). The proportional answer is right
+# arithmetic and the wrong result — at the 108pt Finder draws in a DMG it
+# came out under a pixel and vanished. An icon is looked at an order of
+# magnitude smaller than a splash window, so the edge has to be
+# proportionally heavier to survive the trip. Below about 1.5% it stops
+# reading at 64pt.
+BORDER_FRACTION = 0.015
 BORDER_COLOR = (0x72, 0xf9, 0x87, 255)
+
+# How far the border sits IN from the shape's edge, same units.
+#
+# Not zero, because macOS does not draw the icon at the shape we hand it.
+# Something in the icon pipeline re-rounds the corner slightly tighter
+# than the artwork's own, and a border hugging the edge survives along
+# the straight runs and gets shaved off around the corners — which reads
+# as a broken border rather than a deliberate one. The master is provably
+# fine (the green traces the full arc at every angle); it is the
+# rendering that clips. Holding the border a couple of per cent inside
+# puts it out of reach of whatever is doing that.
+BORDER_INSET = 0.022
 
 
 def load():
@@ -113,22 +132,30 @@ def mask_master(source, out=MASTER, target=1024):
     im = src.convert('RGBA').crop((x0, y0, x1 + 1, y1 + 1))
     im.putalpha(mask)
 
-    # The brand edge, traced along the same rounded rectangle.
+    # The brand edge, traced along the same rounded rectangle — off by
+    # default, see BORDER_FRACTION.
     #
     # Inset by half its width so the stroke lands wholly inside the
     # shape: a stroke is centred on its path, so drawing it on the outline
     # itself would put half of it where the alpha mask has already faded
     # to nothing, and the border would come out at half weight and
     # ragged. Supersampled for the same reason the mask is.
-    bw = max(1.0, BORDER_FRACTION * side_of(box_w, box_h))
-    ring = Image.new('RGBA', (box_w * ss, box_h * ss), (0, 0, 0, 0))
-    ImageDraw.Draw(ring).rounded_rectangle(
-        [bw * ss / 2, bw * ss / 2,
-         box_w * ss - 1 - bw * ss / 2, box_h * ss - 1 - bw * ss / 2],
-        radius=max(0.0, (radius - bw / 2)) * ss,
-        outline=BORDER_COLOR, width=max(1, round(bw * ss)))
-    ring = ring.resize((box_w, box_h), Image.LANCZOS)
-    im = Image.alpha_composite(im, ring)
+    side = side_of(box_w, box_h)
+    bw = BORDER_FRACTION * side
+    if bw >= 1.0:
+        # Distance from the shape's edge to the CENTRE of the stroke.
+        off = BORDER_INSET * side + bw / 2
+        ring = Image.new('RGBA', (box_w * ss, box_h * ss), (0, 0, 0, 0))
+        ImageDraw.Draw(ring).rounded_rectangle(
+            [off * ss, off * ss,
+             box_w * ss - 1 - off * ss, box_h * ss - 1 - off * ss],
+            # Reduced by the same offset so the arc stays concentric with
+            # the shape's corner; leave it at the shape's radius and the
+            # border bows away from the edge along the curve.
+            radius=max(0.0, radius - off) * ss,
+            outline=BORDER_COLOR, width=max(1, round(bw * ss)))
+        ring = ring.resize((box_w, box_h), Image.LANCZOS)
+        im = Image.alpha_composite(im, ring)
 
     side = max(im.size)
     sq = Image.new('RGBA', (side, side), (0, 0, 0, 0))

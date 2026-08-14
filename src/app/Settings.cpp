@@ -149,17 +149,4 @@ double Settings::fullnessFor(qint64 trashBytes, int itemCount) const
         return 0.0;
     return std::clamp(double(trashBytes) / double(thresholdBytes()), 0.0, 1.0);
 }
-
-bool Settings::splashSeen() const
-{
-    return m_store.value(QStringLiteral("splashSeen"), false).toBool();
-}
-void Settings::setSplashSeen()
-{
-    m_store.setValue(QStringLiteral("splashSeen"), true);
-    // Flushed now rather than on destruction: a splash that reappears
-    // because the app was killed before its preferences were written is
-    // exactly the kind of thing nobody would ever manage to reproduce.
-    m_store.sync();
-}
 } // namespace hyperbin

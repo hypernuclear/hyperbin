@@ -151,12 +151,15 @@ qt_add_qml_module(hyperbin
         qml/OozeVisual.qml
         qml/Permissions.qml
         qml/Splash.qml
+        qml/HyperbinLockup.qml
         qml/HyperbinWordmark.qml
         qml/HypernuclearWordmark.qml
 )
 
 # qmltyperegistrations.cpp includes the QML_ELEMENT headers by basename,
 # so their directories have to be on the include path, not just src/.
+# The version reaches the UI as a compile definition rather than being
+target_compile_definitions(hyperbin PRIVATE HYPERBIN_VERSION="${PROJECT_VERSION}")
 target_include_directories(hyperbin PRIVATE
     src
     src/app
@@ -176,6 +179,12 @@ qt_add_resources(hyperbin "hyperbin_icons"
         resources/hyperbin.svg
         resources/env.hdr
         resources/splash.jpg
+        # A static SemiBold instance cut from Inter's variable font and
+        # subset to Latin, by scripts/cut_inter.py. Bundled rather than
+        # asked for by name: this ships as a direct download, and a font
+        # that silently falls back to the system UI face on every machine
+        # but the one it was designed on is not a brand.
+        resources/Inter-SemiBold.ttf
 )
 qt_add_resources(hyperbin "hyperbin_shaders3d"
     PREFIX "/shaders3d"

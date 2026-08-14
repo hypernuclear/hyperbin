@@ -98,6 +98,8 @@ int main(int argc, char **argv)
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("hyperbin"));
     app.setOrganizationName(QStringLiteral("Hypernuclear"));
+    // Reaches QML as Qt.application.version; the splash shows it.
+    app.setApplicationVersion(QStringLiteral(HYPERBIN_VERSION));
     // The menu-bar item IS the app's UI, so the app must survive the
     // overlay window being hidden — which happens whenever the bin is
     // empty or the animation is switched off.
@@ -444,51 +446,6 @@ int main(int argc, char **argv)
     QObject::connect(target.get(), &TrashTarget::statusChanged, &tray,
                      [&](TrashTarget::Status) { refreshProblem(); });
 
-    // --- the brand moment -------------------------------------------------
-    // Once, ever. A background agent that puts up a window every launch
-    // is a nuisance; one that does it on the first run is an
-    // introduction, and it is the only moment this app has to make one.
-    //
-    // HYPERBIN_SPLASH=1 forces it back for development, and deliberately
-    // does NOT mark it seen. Testing the splash used to consume the
-    // user's one real first run, so every check of "does it appear?"
-    // guaranteed the answer would be no the next time anybody looked —
-    // including on the machine of whoever was about to try it.
-    const bool forcedSplash = qEnvironmentVariableIntValue("HYPERBIN_SPLASH") != 0;
-    QPointer<QQuickWindow> splashWindow;
-    QQmlComponent splashComponent(
-        &engine, QUrl(QStringLiteral("qrc:/qt/qml/hyperbin/qml/Splash.qml")));
-    // dwellMs of 0 means "stay until clicked" — see qml/Splash.qml. The
-    // automatic version is for the introduction nobody asked for; the
-    // manual one is for someone who went looking, and taking it away from
-    // them on a timer would be rude.
-    auto showSplash = [&, forcedSplash](int dwellMs) {
-        if (!splashWindow)
-            splashWindow = qobject_cast<QQuickWindow *>(splashComponent.create());
-        if (!splashWindow) {
-            qWarning("hyperbin: splash failed to load: %s",
-                     qPrintable(splashComponent.errorString()));
-            return;
-        }
-        splashWindow->setProperty("dwellMs", dwellMs);
-        // Centred by hand: a frameless splash has no window manager
-        // placement to inherit, so it would otherwise land wherever the
-        // platform felt like putting it. Recomputed each time, because
-        // the display it should appear on may have changed since.
-        if (QScreen *sc = QGuiApplication::primaryScreen()) {
-            const QRect a = sc->availableGeometry();
-            splashWindow->setPosition(a.center()
-                                      - QPoint(splashWindow->width() / 2,
-                                               splashWindow->height() / 2));
-        }
-        QMetaObject::invokeMethod(splashWindow, "appear");
-        activateApp();
-    };
-    if (!settings.splashSeen() || forcedSplash) {
-        showSplash(4000);
-        if (!forcedSplash)
-            settings.setSplashSeen();
-    }
     // --- onboarding -------------------------------------------------------
     // Shown when something the app needs is switched off, and reachable
     // afterwards from the menu bar. macOS cannot prompt for Full Disk
@@ -534,34 +491,76 @@ int main(int argc, char **argv)
         permBridge.publish();
         refreshPermissionEntry();
     });
-    {
-        // Ask the OS before deciding, rather than reading the cache.
-        //
-        // The cache is populated by the target's own start-up probe,
-        // which happens further down — so at this point both flags are
-        // still at their "not yet tested" default of false. Trusting them
-        // put the window up on every launch, granted or not, and then
-        // closed it again a moment later when the real answer arrived.
-        // A window that appears and vanishes is worse than one that
-        // never appears: it reads as a fault.
-        target->refreshPermissions();
-        refreshPermissionEntry();
-        bool missing = false;
-        for (const TrashTarget::Permission &p : target->permissions())
-            if (!p.granted)
-                missing = true;
-        // ...and never over the splash. They would stack, and the point
-        // of a brand moment is that it is the only thing on screen.
-        if (missing) {
-            if (splashWindow && splashWindow->isVisible())
-                QObject::connect(splashWindow, &QWindow::visibleChanged, &app,
-                                 [showPermissions](bool vis) {
-                                     if (!vis)
-                                         showPermissions();
-                                 });
-            else
-                showPermissions();
+    // Ask the OS before deciding, rather than reading the cache.
+    //
+    // The cache is populated by the target's own start-up probe, which
+    // happens further down — so at this point both flags are still at
+    // their "not yet tested" default of false. Trusting them put the
+    // window up on every launch, granted or not, and then closed it
+    // again a moment later when the real answer arrived. A window that
+    // appears and vanishes is worse than one that never appears: it
+    // reads as a fault.
+    target->refreshPermissions();
+    refreshPermissionEntry();
+    bool permissionsMissing = false;
+    for (const TrashTarget::Permission &p : target->permissions())
+        if (!p.granted)
+            permissionsMissing = true;
+
+    // --- the brand moment -------------------------------------------------
+    // Every launch, not just the first. This is a menu-bar agent: it is
+    // started once at login and then not thought about again, so "once
+    // ever" meant the introduction happened on a machine's first boot
+    // after install and never again on any of the hundreds after it.
+    // Four seconds of logo at login is the whole reason the app is free.
+    //
+    // Including the launches where a permission is missing. It is
+    // tempting to skip it there and get the user straight to the thing
+    // they have to do, but the permissions window already waits for the
+    // splash to leave, so the cost is four seconds, and this is the one
+    // window the app exists to show.
+    QPointer<QQuickWindow> splashWindow;
+    QQmlComponent splashComponent(
+        &engine, QUrl(QStringLiteral("qrc:/qt/qml/hyperbin/qml/Splash.qml")));
+    // dwellMs of 0 means "stay until clicked" — see qml/Splash.qml. The
+    // automatic version is for the introduction nobody asked for; the
+    // manual one is for someone who went looking, and taking it away from
+    // them on a timer would be rude.
+    auto showSplash = [&](int dwellMs) {
+        if (!splashWindow)
+            splashWindow = qobject_cast<QQuickWindow *>(splashComponent.create());
+        if (!splashWindow) {
+            qWarning("hyperbin: splash failed to load: %s",
+                     qPrintable(splashComponent.errorString()));
+            return;
         }
+        splashWindow->setProperty("dwellMs", dwellMs);
+        // Centred by hand: a frameless splash has no window manager
+        // placement to inherit, so it would otherwise land wherever the
+        // platform felt like putting it. Recomputed each time, because
+        // the display it should appear on may have changed since.
+        if (QScreen *sc = QGuiApplication::primaryScreen()) {
+            const QRect a = sc->availableGeometry();
+            splashWindow->setPosition(a.center()
+                                      - QPoint(splashWindow->width() / 2,
+                                               splashWindow->height() / 2));
+        }
+        QMetaObject::invokeMethod(splashWindow, "appear");
+        activateApp();
+    };
+    showSplash(4000);
+    // The permissions window comes after, never over. They would stack,
+    // and the point of a brand moment is that it is the only thing on
+    // screen.
+    if (permissionsMissing) {
+        if (splashWindow && splashWindow->isVisible())
+            QObject::connect(splashWindow, &QWindow::visibleChanged, &app,
+                             [showPermissions](bool vis) {
+                                 if (!vis)
+                                     showPermissions();
+                             });
+        else
+            showPermissions();
     }
     // The menu bar's problem line opens the window rather than jumping
     // straight to a settings pane: when two permissions are missing, a

@@ -55,11 +55,6 @@ public:
     Threshold threshold() const { return m_threshold; }
 
     void setEnabled(bool on);
-    /// Has the splash been shown? It is a brand moment, not a dialog —
-    /// once, on the first run ever, and never again unless the user
-    /// wipes their preferences.
-    bool splashSeen() const;
-    void setSplashSeen();
     void setInfestation(const QString &id);
     void setDensity(Density d);
     void setThreshold(Threshold t);

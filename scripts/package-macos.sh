@@ -182,6 +182,35 @@ prune "$APP/Contents/PlugIns/sqldrivers" \
       "$APP"/Contents/Frameworks/QtQuickDialogs2*.framework \
       "$APP/Contents/Resources/qml/QtQuick/Dialogs"
 
+# --- thin the universal slices ----------------------------------------------
+#
+# Qt's macOS installer ships universal frameworks, so an arm64-only build
+# still carries a complete x86_64 copy of Qt that can never execute. It
+# is close to half the bundle.
+#
+# Skipped when our own binary is universal — then both slices are real.
+# Must run BEFORE signing, since rewriting a Mach-O invalidates its seal.
+THIN_ARCH=$(lipo -archs "$APP/Contents/MacOS/hyperbin" 2>/dev/null || echo "")
+if [ "$(printf '%s' "$THIN_ARCH" | wc -w)" -eq 1 ]; then
+    before=$(du -sm "$APP" | cut -f1)
+    thinned=0
+    while IFS= read -r -d '' f; do
+        archs=$(lipo -archs "$f" 2>/dev/null) || continue
+        case "$archs" in *' '*) ;; *) continue ;; esac      # already single-arch
+        case " $archs " in *" $THIN_ARCH "*) ;; *) continue ;; esac
+        if lipo -thin "$THIN_ARCH" "$f" -output "$f.thin" 2>/dev/null; then
+            # Written back through the original file rather than moved over
+            # it, so permissions and the inode survive.
+            cat "$f.thin" > "$f" && thinned=$((thinned + 1))
+            rm -f "$f.thin"
+        fi
+    done < <(find "$APP" -type f -print0)
+    after=$(du -sm "$APP" | cut -f1)
+    echo "thinned $thinned binaries to $THIN_ARCH: $((before - after)) MB"
+else
+    echo "universal build ($THIN_ARCH) — not thinning"
+fi
+
 # --- signing ---------------------------------------------------------------
 IDENTITY="${CODESIGN_IDENTITY:-}"
 if [ -z "$IDENTITY" ]; then
@@ -247,6 +276,7 @@ cp -R "$APP" "$STAGE/"
 # image is still good, so the file's existence is the real test.
 create-dmg \
     --volname "hyperbin" \
+    --format ULMO \
     --window-pos 200 120 \
     --window-size 660 400 \
     --icon-size 110 \

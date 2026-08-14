@@ -1,26 +1,55 @@
 # hyperbin
 
-Animated flies that swarm your Trash / Recycle Bin as it fills up.
+Animated effects over your Trash / Recycle Bin, growing as it fills up.
 Free giveaway app for macOS and Windows. Direct download only.
 
-Cross-platform Qt 6.11 + C++. Separate from Hypershot — its own repo,
-its own signing identity, its own updater feed.
+Cross-platform Qt 6.11 + C++. Two effects ship today — **Flies** and
+**Ooze** — picked from the menu-bar item.
 
 ## Status
 
-macOS works end to end: the overlay sits above the Dock, tracks the real
-Trash icon through magnification, and the swarm grows with the item
-count.
+**macOS works end to end.** The overlay sits above the Dock, tracks the
+real Trash icon through magnification, and the effect grows with what is
+in the bin.
 
-Windows works too — `RecycleBinTarget` finds the bin through the
+**Windows works too.** `RecycleBinTarget` finds the bin through the
 desktop's shell view, reads count *and* size from `SHQueryRecycleBin`,
 and the overlay hides itself whenever a window covers the desktop at the
 bin. The icon rect is calibrated by measurement rather than by eye:
 `binprobe --measure` matches the shell's own artwork against the screen
 and prints where the icon really is. See `docs/windows-backend.md`.
 
-See `docs/architecture.md` for the decisions and `docs/battery.md` for
-the power budget.
+A menu-bar / tray item owns the settings: which effect, how much of it,
+how full the bin has to be before anything happens, whether to run at
+all, and open-at-login.
+
+See `docs/architecture.md` for the decisions, `docs/effects.md` for the
+contract a new effect implements, and `docs/battery.md` for the power
+budget.
+
+## The effects
+
+Both are driven by the same host (`EffectItem`) and the same three-state
+power model, and neither knows anything about the other.
+
+**Flies** — a steering-behaviour swarm. Wander, separation and
+containment produce the motion; nothing is keyframed. They land on the
+bin, walk about, take off, pass behind it, and scatter from the pointer.
+Drawn as instanced sprites through a scene-graph node, with a shader that
+erases a fly wherever the bin's artwork is opaque so it reads as passing
+behind.
+
+**Ooze** — green sludge filling the bin and running down the outside.
+Qt Quick 3D, because the look wanted is transmission: the bin seen
+*through* the gel, refracted, with real specular and an environment.
+The body is a solid of revolution swept from the bin's own measured
+silhouette, and everything that moves — the drifting lumps, the wave
+travelling down it, the puddle gathering at the foot — happens in the
+vertex shader, so the mesh is rebuilt only when the level changes.
+
+Adding a third means one entry in `EffectRegistry` and a class
+implementing `Effect`. `docs/effects.md` is the contract, including the
+three Qt colour-pipeline rules that will otherwise cost you an afternoon.
 
 ## Build
 
@@ -50,8 +79,7 @@ generator outside the MSVC environment and dies on `nmake -?` / "no such
 file or directory". Naming the compiler in the preset doesn't help — Qt
 Creator matches a toolchain by absolute `cl.exe` path, which is
 machine-specific and can't be committed — so the presets simply stop at
-the Windows boundary and leave kit selection to the IDE. This is how
-Hypershot builds on both platforms too.
+the Windows boundary and leave kit selection to the IDE.
 
 Qt's location is never committed. The build auto-detects the newest
 `~/Qt/6.*` install; override with `QT_ROOT`, with
@@ -77,13 +105,66 @@ If something is caught, **rotate the credential first**. Removing it from
 the diff does nothing for a value that was already pushed — it stays in
 the history and must be treated as compromised.
 
-## Testing
+## Running it
 
-**macOS is live** — `DockTrashTarget` reads your real Trash and finds the
-real Dock icon. Windows still returns the stub.
+**Preview (use this one for anything visual).** A normal window with the
+bin's real artwork drawn underneath, at a size where you can actually see
+what an effect is doing. Judging a look by screenshotting a 49-point Dock
+icon does not work — at that size every feature worth arguing about is
+sub-pixel.
 
-Two permissions, and neither is Full Disk Access. Both are asked for by
-the app itself — no console-only failures:
+```sh
+HYPERBIN_PREVIEW=ooze  ./build/hyperbin.app/Contents/MacOS/hyperbin --windowed
+HYPERBIN_PREVIEW=flies ./build/hyperbin.app/Contents/MacOS/hyperbin --windowed
+```
+
+A slider owns fullness, so you can hold a value and watch it settle.
+Drag to 0 and everything should leave under its own power — if anything
+remains, the render clock never stops and the power budget is broken.
+
+Two knobs make it scriptable, and between them they are how most of the
+visual work gets checked:
+
+```sh
+HYPERBIN_PREVIEW_SHOT=/tmp/a.png     # grab the window, then exit
+HYPERBIN_PREVIEW_SHOT_MS=12000       # ...at this moment, not the default 2.5s
+```
+
+Shooting the same scene twice and differencing the two is the only
+reliable way to tell an animation that is running from one that is merely
+present in the shader. That has been wrong twice.
+
+**Overlay.** The real thing: frameless, click-through, above the Dock, on
+every Space, tracking your actual Trash.
+
+```sh
+./build/hyperbin.app/Contents/MacOS/hyperbin
+HYPERBIN_DEBUG=1 ./build/hyperbin.app/Contents/MacOS/hyperbin   # geometry + clock log
+./build/hyperbin.app/Contents/MacOS/hyperbin --paintdebug       # fill the overlay
+```
+
+`HYPERBIN_DEBUG` prints the render clock every time it changes, with the
+interval the power policy asked for and the floor the current effect
+imposed. That number decides the whole energy story and is otherwise
+invisible.
+
+Nothing draws when the Dock is auto-hidden — the icon is parked outside
+every display and there is nothing to sit on.
+
+**Headless.** `./build/simtest` — the simulations only, never the
+renderer, so it runs without a display. It asserts the swarm populates,
+moves, lands, walks, stays over the bin, scales with it and fully
+disperses when emptied; that the ooze creeps rather than snapping on,
+grows with the trash and recedes to nothing; that the overlay margins are
+large enough for what is drawn in them; and that settings survive a
+restart.
+
+VS Code: `.vscode/launch.json` has the debug configs.
+
+## Permissions (macOS)
+
+Two, and neither is Full Disk Access. Both are asked for by the app
+itself — no console-only failures:
 
 - **Accessibility** — the only way to get Dock item geometry. If it's
   missing the app shows the system prompt (which carries an "Open System
@@ -117,40 +198,10 @@ makes the terminal the responsible process, so the app inherits the grant
 and you can never reach the ungranted path. `HYPERBIN_FORCE_NO_AX=1`
 forces it, which is how the prompt flow gets tested.
 
-**Windowed (use this one).** A manual sim playground: normal window, a
-drawn stand-in for the bin, and a slider that owns fullness. Nothing else
-drives it, so you can hold a value and watch the swarm settle.
-
-```sh
-./build/hyperbin.app/Contents/MacOS/hyperbin --windowed
-```
-
-Drag the slider 0 → 100%: one lonely fly at the low end, up to 10 at
-full, agitation rising with it. Drag back to 0 and they should disperse
-outward and disappear entirely — if any remain, the render clock never
-stops and the power budget is broken.
-
-**Overlay.** The real thing: frameless, click-through, above the Dock, on
-every Space, tracking your actual Trash.
-
-```sh
-./build/hyperbin.app/Contents/MacOS/hyperbin
-HYPERBIN_DEBUG=1 ./build/hyperbin.app/Contents/MacOS/hyperbin   # geometry log
-./build/hyperbin.app/Contents/MacOS/hyperbin --paintdebug       # fill the overlay
-```
-
-Nothing draws when the Dock is auto-hidden — the icon is parked outside
-every display and there is nothing to sit on. Turn auto-hide off to see
-it, or reveal the Dock and wait up to a second for the poll to notice.
-
-**Headless.** `./build/simtest` — asserts the swarm populates, moves,
-stays over the bin, scales with it, and fully disperses when emptied.
-
-VS Code: `.vscode/launch.json` has all three as debug configs.
-
 ## Known gaps
 
-- **Windows has no backend yet** — still the stub.
+- **No onboarding.** Both macOS permissions have to be granted by hand;
+  nothing explains them to the user yet.
 - **The mask lags the Dock by a frame.** Flies pass behind the bin via a
   shader that erases them where the Trash artwork is opaque
   (`shaders/flymask.*`). Its position comes from the Accessibility poll,
@@ -158,33 +209,33 @@ VS Code: `.vscode/launch.json` has all three as debug configs.
   hidden a few pixels off. Barely perceptible — and far better than the
   copy-the-icon approach it replaced, where the same lag showed as a
   visibly desynced duplicate bin.
+- **The ooze infers the bin's rim** from the widest row of its
+  silhouette. Right for a tapered container, which both shells draw, but
+  it is an inference about artwork rather than a fact about it.
+- **The ooze level is not a gauge.** It reads high early on purpose — a
+  half-full bin and a full one look nearly the same. `OozeSim::minShare`
+  is the knob if that should track fullness more honestly.
 - **Only `~/.Trash`.** Items trashed from other volumes live in
   `/Volumes/<x>/.Trashes/<uid>` and aren't counted.
-- **Polling, not notifications.** The icon is polled at 50ms while on
+- **Polling, not notifications.** The icon is polled at 16ms while on
   screen (fast enough to follow Dock magnification) and 1s when hidden,
   so revealing an auto-hidden Dock lags up to a second. An `AXObserver`
   on the Dock item would make it immediate and cheaper.
-- **No menu-bar item, no onboarding.** Both permissions currently have to
-  be granted by hand; nothing explains them to the user yet.
-- **Power is unmeasured.** 60fps was chosen for looks over the original
-  20fps budget; `docs/battery.md` has the numbers that need verifying.
+- **Energy is measured only in the preview**, at a far larger size than
+  the Dock ever draws. Ooze runs about 1.3x the flies there; at icon size
+  the gap should close, but that has not been checked on a real Dock.
 
 ## Layout
 
 ```
-src/core/       platform-agnostic: fly simulation, bin state, settings
-src/platform/   the ~20% that differs: TrashTarget + OverlaySurface impls
-src/render/     QSGGeometryNode instanced sprite renderer
-qml/            tray UI + onboarding (not the flies — those are scene graph)
+src/core/       platform-agnostic: simulations, the Effect contract,
+                the effect registry, the power policy
+src/effects/    one directory per effect's implementation
+src/platform/   the ~20% that differs: TrashTarget + overlay surface
+src/render/     EffectItem, the host that clocks an effect and hands it
+                the bin's geometry, artwork and silhouette
+shaders/        fly mask (baked .qsb) and the ooze's Quick3D snippets
+qml/            tray glyph and the ooze's Quick3D scene
+docs/           architecture, the effect contract, battery, Windows
 ```
 
-## Why not Rive
-
-Fly motion is emergent, not authored. Steering behaviours (wander +
-separation + containment) produce better-looking flies in ~200 lines than
-hand-keyframed loops would, and they respond continuously to bin
-fullness instead of switching between discrete states. Rive earns its
-place when a designer needs to author the motion; here the motion is a
-simulation. Revisit if we add authored character animation.
-
-The simulation is also what makes the power budget achievable — see below.

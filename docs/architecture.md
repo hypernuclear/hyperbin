@@ -11,15 +11,14 @@ Accessibility API for Dock geometry), so a MAS build couldn't do the
 core feature. Microsoft Store via full-trust MSIX would work, but a
 lead magnet on a store is a funnel with the bottom cut off — the store
 owns the customer, so no email address and no attribution. Reuse
-Hypershot's Developer ID + notarization + Sparkle pipeline instead and
-gate the download on an email.
+our own Developer ID + notarization + Sparkle pipeline instead and gate
+the download on an email.
 
 **Qt licensing: LGPL is fine here.** Since we're not shipping to stores,
 LGPL v3 works — dynamic-link the Qt libraries and provide relinking
-info. That sidesteps the open question of whether Hypershot's commercial
-seat extends to a second product. Worth confirming with Qt sales anyway
-(commercial Qt is normally per-developer, not per-app, so it likely
-does), but hyperbin doesn't have to block on the answer.
+info. That sidesteps any question about commercial seat coverage. Worth
+confirming with Qt sales anyway, but hyperbin doesn't have to block on
+the answer.
 
 **Procedural simulation, not Rive.** Fly motion is emergent, not
 authored. Steering behaviours produce better flies in ~200 lines than

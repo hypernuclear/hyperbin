@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 
-# Match Hypershot's floor so the same toolchain builds both.
+# macOS 14 is the floor. SMAppService (login items) needs 13+, and
+# nothing here wants the LSSharedFileList fallback that supporting
+# older versions would drag back in.
 set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS version")
 
 project(hyperbin VERSION 0.1.0 LANGUAGES CXX)

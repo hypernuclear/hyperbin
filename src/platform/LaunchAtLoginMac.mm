@@ -6,8 +6,8 @@
 
 namespace hyperbin::launchAtLogin {
 
-// SMAppService, the same call hypershot settles on. It replaces the old
-// LSSharedFileList/login-item-helper dance entirely and puts the app in
+// SMAppService. It replaces the old LSSharedFileList/login-item-helper
+// dance entirely and puts the app in
 // System Settings > General > Login Items where the user expects to find
 // it — including the switch to turn us off, which is the point.
 //

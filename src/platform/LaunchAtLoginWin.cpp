@@ -19,11 +19,10 @@ namespace {
 
 // A shortcut in the Startup folder, not an HKCU\...\Run value.
 //
-// hypershot shipped the registry approach first and migrated off it, so
-// this starts where that ended up: the shortcut is visible to the user in
-// Explorer and in Task Manager's Startup tab, which is where people go to
-// turn things off. A Run value is invisible in Explorer and reads as
-// something an app did behind their back.
+// The shortcut is visible to the user in Explorer and in Task Manager's
+// Startup tab, which is where people go to turn things off. A Run value
+// is invisible in Explorer and reads as something an app did behind
+// their back.
 constexpr wchar_t kShortcutName[] = L"\\hyperbin.lnk";
 
 QString shortcutPath()

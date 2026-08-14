@@ -58,7 +58,7 @@ struct HitTest
 /// Topmost AND (a tool window or click-through) is the signature of an
 /// overlay: screen-capture selection layers, magnifiers, on-screen
 /// keyboards, notification HUDs. Treating those as "the desktop is
-/// covered" is what made the swarm vanish the moment Hypershot's capture
+/// covered" is what made the swarm vanish the moment a screen-capture
 /// overlay went up — so every screenshot of hyperbin came out empty, and
 /// so would any user's screenshot of their own desktop.
 ///

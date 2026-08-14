@@ -148,9 +148,9 @@ QIcon TrayMenu::trayIcon()
 
 #if defined(Q_OS_MACOS)
     // macOS only. Since macOS 11 the menu bar's appearance follows the
-    // WALLPAPER rather than the light/dark setting — hypershot hit this
-    // and landed on the same answer — so choosing a colour by colour
-    // scheme is wrong here, and AppKit's template mechanism is right. It
+    // WALLPAPER rather than the light/dark setting, so choosing a colour
+    // by colour scheme is wrong here and AppKit's template mechanism is
+    // right. It
     // tints the silhouette to match what the bar actually looks like,
     // including the translucent cases a colour scheme can't describe.
     icon.setIsMask(true);

@@ -28,7 +28,14 @@ constexpr int kIconPx[] = {22, 44, 66};
 /// Padding around the glyph, as a fraction of the icon box. The artwork
 /// is cropped to its own ink first (see trayIcon), so this is the only
 /// empty space in the image and the mark fills the rest.
-constexpr qreal kInset = 0.02;
+///
+/// Half a per cent, which is as close to none as is safe: the ink bounds
+/// come from a probe render thresholded at alpha 8, so the very faintest
+/// antialiased edge sits a fraction of a pixel outside them. This is the
+/// only remaining lever on how large the mark appears — the shell scales
+/// the image to the menu bar and ignores whatever size it was given, so
+/// the fraction of the image the ink fills is the whole of it.
+constexpr qreal kInset = 0.005;
 
 } // namespace
 

@@ -20,4 +20,13 @@ void configureOverlayWindow(QWindow *w);
 /// allowed — this stops throttling, it does not keep the Mac awake.
 void setAnimationActivity(bool active);
 
+/// Bring the app forward so a window it has just opened is actually seen.
+///
+/// An LSUIElement agent has no Dock icon and is not in the activation
+/// order, so showing a window puts it behind whatever the user was
+/// doing. Qt's requestActivate() cannot fix that on its own — it asks the
+/// window manager to focus a window belonging to an app that is not
+/// front.
+void activateApp();
+
 } // namespace hyperbin

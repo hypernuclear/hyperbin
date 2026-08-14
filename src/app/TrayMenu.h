@@ -37,10 +37,15 @@ public:
     /// see the trash but I can't draw at it" — without this the app is
     /// simply, silently, doing nothing.
     void setProblem(const QString &text, bool actionable);
+    /// Show the permissions entry, and say whether anything is still
+    /// switched off. Called with `count == 0` on platforms that need no
+    /// permissions at all, which hides the entry outright rather than
+    /// offering a window listing nothing.
+    void setPermissionState(int count, int missing);
 
 signals:
     void quitRequested();
-    /// The problem line was clicked: open whatever fixes it.
+    /// The problem line, or the permissions entry, was clicked.
     void remediationRequested();
 
 private:
@@ -61,6 +66,7 @@ private:
     QAction      *m_login     = nullptr;
     QAction      *m_status    = nullptr;
     QAction      *m_problem   = nullptr;
+    QAction      *m_perms     = nullptr;
     QActionGroup *m_effectGroup = nullptr;
     QActionGroup *m_densityGroup   = nullptr;
     QActionGroup *m_thresholdGroup = nullptr;

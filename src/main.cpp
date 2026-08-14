@@ -10,6 +10,8 @@
 #include <QSvgRenderer>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QPointer>
+#include <QQmlComponent>
 #include <QQuickImageProvider>
 #include <QQuickWindow>
 #include <QScreen>
@@ -23,6 +25,45 @@
 #endif
 
 using namespace hyperbin;
+
+namespace {
+/// The onboarding window's connection to the platform layer.
+///
+/// A tiny object rather than exposing TrashTarget to QML directly: the
+/// window needs exactly two verbs and one list, and TrashTarget is a
+/// large interface that has nothing else to do with the UI.
+class PermissionBridge : public QObject
+{
+    Q_OBJECT
+public:
+    PermissionBridge(TrashTarget *target, QQmlApplicationEngine *engine,
+                     QObject *parent = nullptr)
+        : QObject(parent), m_target(target), m_engine(engine)
+    {
+    }
+    /// Push the current state into the QML context. Re-setting the
+    /// property is what re-evaluates the bindings that read it.
+    void publish()
+    {
+        QVariantList out;
+        for (const TrashTarget::Permission &p : m_target->permissions()) {
+            QVariantMap m;
+            m.insert(QStringLiteral("id"), p.id);
+            m.insert(QStringLiteral("title"), p.title);
+            m.insert(QStringLiteral("detail"), p.detail);
+            m.insert(QStringLiteral("granted"), p.granted);
+            out.append(m);
+        }
+        m_engine->rootContext()->setContextProperty(
+            QStringLiteral("permissionList"), out);
+    }
+    Q_INVOKABLE void open(const QString &id) { m_target->openPermission(id); }
+    Q_INVOKABLE void refresh() { m_target->refreshPermissions(); }
+private:
+    TrashTarget *m_target;
+    QQmlApplicationEngine *m_engine;
+};
+} // namespace
 namespace {
 /// Serves the preview's stand-in for the shell's trash artwork to QML, so
 /// dev mode can draw the bin underneath the overlay the way the Dock
@@ -218,6 +259,10 @@ int main(int argc, char **argv)
         if (s == TrashTarget::Status::PermissionRequired)
             qInfo("hyperbin: waiting for Accessibility. The system prompt is showing; "
                   "tracking starts as soon as it's granted, no restart needed.");
+        if (s == TrashTarget::Status::DiskAccessRequired)
+            qInfo("hyperbin: waiting for Full Disk Access. There is no prompt for "
+                  "this one — the app is already listed in Settings > Privacy & "
+                  "Security > Full Disk Access, and only needs switching on.");
     });
 
     // Wire the three inputs that decide whether we draw at all.
@@ -376,7 +421,11 @@ int main(int argc, char **argv)
             tray.setProblem(QString(), false);
             break;
         case TrashTarget::Status::PermissionRequired:
-            tray.setProblem(QStringLiteral("Needs Accessibility — open Settings"), true);
+        case TrashTarget::Status::DiskAccessRequired:
+            // Left to the permissions entry, which carries the warning
+            // sign and opens the window listing every permission at once.
+            // Saying it twice, two lines apart, reads as two problems.
+            tray.setProblem(QString(), false);
             break;
         case TrashTarget::Status::IconHidden:
 #if defined(Q_OS_WIN)
@@ -394,8 +443,66 @@ int main(int argc, char **argv)
     };
     QObject::connect(target.get(), &TrashTarget::statusChanged, &tray,
                      [&](TrashTarget::Status) { refreshProblem(); });
+
+    // --- onboarding -------------------------------------------------------
+    // Shown when something the app needs is switched off, and reachable
+    // afterwards from the menu bar. macOS cannot prompt for Full Disk
+    // Access at all, so a window that explains what is needed and opens
+    // the right pane is the entire remedy available.
+    PermissionBridge permBridge(target.get(), &engine);
+    engine.rootContext()->setContextProperty(QStringLiteral("permissionBridge"),
+                                             &permBridge);
+    permBridge.publish();
+    QQmlComponent permComponent(&engine,
+                                QUrl(QStringLiteral(
+                                    "qrc:/qt/qml/hyperbin/qml/Permissions.qml")));
+    QPointer<QQuickWindow> permWindow;
+    auto showPermissions = [&] {
+        permBridge.publish();
+        if (!permWindow) {
+            permWindow = qobject_cast<QQuickWindow *>(permComponent.create());
+            if (!permWindow) {
+                qWarning("hyperbin: permissions window failed to load: %s",
+                         qPrintable(permComponent.errorString()));
+                return;
+            }
+        }
+        permWindow->show();
+        permWindow->raise();
+        permWindow->requestActivate();
+#if defined(Q_OS_MACOS)
+        // An accessory app has no Dock icon and is not in the activation
+        // order, so the window would otherwise open behind whatever the
+        // user was doing. requestActivate() alone cannot fix that.
+        activateApp();
+#endif
+    };
+    auto refreshPermissionEntry = [&] {
+        const QList<TrashTarget::Permission> ps = target->permissions();
+        int missing = 0;
+        for (const TrashTarget::Permission &p : ps)
+            if (!p.granted)
+                ++missing;
+        tray.setPermissionState(int(ps.size()), missing);
+    };
+    QObject::connect(target.get(), &TrashTarget::permissionsChanged, &app, [&] {
+        permBridge.publish();
+        refreshPermissionEntry();
+    });
+    refreshPermissionEntry();
+    {
+        bool missing = false;
+        for (const TrashTarget::Permission &p : target->permissions())
+            if (!p.granted)
+                missing = true;
+        if (missing)
+            showPermissions();
+    }
+    // The menu bar's problem line opens the window rather than jumping
+    // straight to a settings pane: when two permissions are missing, a
+    // single jump can only ever address one of them.
     QObject::connect(&tray, &TrayMenu::remediationRequested, &app,
-                     [&] { target->openRemediation(); });
+                     [&] { showPermissions(); });
 
     // --- master switch ----------------------------------------------------
     // Off means genuinely off: no frames, no overlay surface, and the
@@ -436,3 +543,5 @@ int main(int argc, char **argv)
 
     return app.exec();
 }
+
+#include "main.moc"

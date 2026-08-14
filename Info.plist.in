@@ -22,11 +22,6 @@
 	<key>LSUIElement</key>
 	<true/>
 
-	<!-- Shown in the Automation prompt. Reading ~/.Trash directly would
-	     need Full Disk Access; asking Finder for the count needs only
-	     this, which is a far lighter ask for a free app. -->
-	<key>NSAppleEventsUsageDescription</key>
-	<string>hyperbin asks Finder how many items are in your Trash, so it knows how many flies to draw.</string>
 
 	<key>NSHighResolutionCapable</key>
 	<true/>

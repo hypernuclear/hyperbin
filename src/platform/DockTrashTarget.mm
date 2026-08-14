@@ -212,7 +212,7 @@ DockTrashTarget::DockTrashTarget(QObject *parent)
         pollIconRect();
         if (++m_trashTick >= (m_poll.interval() >= kSlowPollMs ? 1 : 60)) {
             m_trashTick = 0;
-            pollTrash();  // the Finder round-trip stays at ~1Hz regardless
+            pollTrash();  // the directory walk stays at ~1Hz regardless
         }
     });
 
@@ -232,6 +232,7 @@ DockTrashTarget::DockTrashTarget(QObject *parent)
         CFRelease(probe);
 
         m_permissionWatch.stop();
+        refreshPermissions();
         qInfo("hyperbin: Accessibility is live — tracking the Dock.");
         beginTracking();
     });
@@ -268,11 +269,32 @@ void DockTrashTarget::start()
 
 void DockTrashTarget::beginTracking()
 {
-    // Reading ~/.Trash outright needs Full Disk Access. If we happen to
-    // have it, use it — it's cheaper and needs nobody else running.
-    m_directRead = QDir(QDir::homePath() + QStringLiteral("/.Trash")).isReadable();
-    qInfo("hyperbin: trash count via %s",
-          m_directRead ? "direct read (Full Disk Access)" : "Finder (Automation)");
+    // Full Disk Access. The check is also what gets us LISTED in the
+    // settings pane — see fullDiskAccessGranted() — so it has to run
+    // whether or not anything is going to read the trash afterwards.
+    refreshPermissions();
+    if (!m_hasDisk) {
+        qInfo("hyperbin: waiting for Full Disk Access.");
+        setStatus(Status::DiskAccessRequired);
+        // Granting it doesn't notify the app either, and unlike
+        // Accessibility there is no prompt to wait on — so poll, and
+        // start working the moment it appears.
+        m_diskWatch.setInterval(1000);
+        connect(&m_diskWatch, &QTimer::timeout, this, [this] {
+            if (!fullDiskAccessGranted())
+                return;
+            m_diskWatch.stop();
+            refreshPermissions();
+            qInfo("hyperbin: Full Disk Access granted — reading the trash.");
+            // The mtime gate would otherwise skip the first real read: the
+            // directory has not changed since we last looked, we simply
+            // could not see it.
+            m_trashMTime = QDateTime();
+            pollTrash();
+            pollIconRect();
+        });
+        m_diskWatch.start();
+    }
 
     pollIconRect();
     pollTrash();
@@ -283,6 +305,7 @@ void DockTrashTarget::stop()
 {
     m_poll.stop();
     m_permissionWatch.stop();
+    m_diskWatch.stop();
 }
 
 void DockTrashTarget::setStatus(Status s)
@@ -291,28 +314,6 @@ void DockTrashTarget::setStatus(Status s)
         return;
     m_status = s;
     emit statusChanged(s);
-}
-
-int DockTrashTarget::countViaFinder()
-{
-    // Measured: ~/.Trash listing is TCC-protected (Full Disk Access), but
-    // asking Finder for the count only needs Automation, which is a prompt
-    // the user can reasonably accept for a novelty app.
-    NSAppleScript *s = [[NSAppleScript alloc]
-        initWithSource:@"tell application \"Finder\" to count items in trash"];
-    NSDictionary *err = nil;
-    NSAppleEventDescriptor *r = [s executeAndReturnError:&err];
-    if (!r || err) {
-        static bool warned = false;
-        if (!warned) {
-            warned = true;
-            qWarning("hyperbin: Finder refused the trash count (%s). Grant Automation "
-                     "in System Settings > Privacy & Security > Automation.",
-                     [[err description] UTF8String] ?: "no detail");
-        }
-        return -1;
-    }
-    return int(r.int32Value);
 }
 
 void DockTrashTarget::setAnimating(bool animating)
@@ -333,7 +334,22 @@ void DockTrashTarget::setAnimating(bool animating)
         m_poll.setInterval(kSlowPollMs);
     }
 }
-
+bool DockTrashTarget::fullDiskAccessGranted()
+{
+    // A real listing, not access() and not isReadable().
+    //
+    // Both of those answer the question without touching anything, which
+    // is exactly the problem: TCC adds an app to the Full Disk Access
+    // pane when it ATTEMPTS a protected read, and a check that never
+    // attempts one leaves the user staring at a list we are not in. They
+    // would then have to find the bundle and add it by hand, which is a
+    // much worse first run than flicking a switch that is already there.
+    NSString *path = [NSHomeDirectory() stringByAppendingPathComponent:@".Trash"];
+    NSError *err = nil;
+    NSArray *items = [NSFileManager.defaultManager
+        contentsOfDirectoryAtPath:path error:&err];
+    return items != nil;
+}
 void DockTrashTarget::pollTrash()
 {
     // Only ~/.Trash. Items trashed from other volumes live in
@@ -347,33 +363,28 @@ void DockTrashTarget::pollTrash()
         return;
     m_trashMTime = mtime;
 
-    int n = -1;
-    if (m_directRead) {
-        const auto entries = QDir(path).entryList(
-            QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System);
-        n = 0;
-        for (const QString &e : entries)
-            if (e != QStringLiteral(".DS_Store"))
-                ++n;
-    } else {
-        n = countViaFinder();
-    }
-    if (n < 0)
-        return; // couldn't tell; leave the last known count alone
+    const auto entries = QDir(path).entryList(
+        QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System);
+    if (entries.isEmpty() && !QDir(path).isReadable())
+        return; // no Full Disk Access; leave the last known state alone
+    int n = 0;
+    for (const QString &e : entries)
+        if (e != QStringLiteral(".DS_Store"))
+            ++n;
 
-    // Size, when we're allowed to read the directory at all. Only
-    // recomputed on an mtime change, same as the count, so an idle bin
-    // costs one stat() per poll and nothing else.
-    qint64 bytes = -1;
-    if (m_directRead) {
-        bytes = 0;
-        QDirIterator it(path, QDir::Files | QDir::NoDotAndDotDot | QDir::Hidden
-                                  | QDir::System,
-                        QDirIterator::Subdirectories);
-        while (it.hasNext()) {
-            it.next();
-            bytes += it.fileInfo().size();
-        }
+    // Size. Recursive, because most of what makes a trash big is
+    // folders — app bundles, packages, project directories — and the
+    // whole reason this needs Full Disk Access is that nothing short of
+    // reading the tree can size those. Only recomputed on an mtime
+    // change, same as the count, so an idle bin costs one stat() per
+    // poll and nothing else.
+    qint64 bytes = 0;
+    QDirIterator it(path, QDir::Files | QDir::NoDotAndDotDot | QDir::Hidden
+                              | QDir::System,
+                    QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        it.next();
+        bytes += it.fileInfo().size();
     }
     if (bytes != m_bytes) {
         m_bytes = bytes;
@@ -518,13 +529,52 @@ QImage macTrashIcon(int px, bool full)
     return out;
 }
 
+QList<TrashTarget::Permission> DockTrashTarget::permissions() const
+{
+    return {
+        { QStringLiteral("accessibility"), QStringLiteral("Accessibility"),
+          QStringLiteral("Find the Trash icon on your Dock, and follow it "
+                         "as the Dock magnifies."),
+          m_hasAx },
+        { QStringLiteral("fulldisk"), QStringLiteral("Full Disk Access"),
+          QStringLiteral("Measure how full the Trash is, so the effect can "
+                         "grow with it."),
+          m_hasDisk },
+    };
+}
+void DockTrashTarget::openPermission(const QString &id)
+{
+    NSString *pane = id == QStringLiteral("fulldisk")
+        ? @"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+        : @"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
+    [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:pane]];
+}
+void DockTrashTarget::refreshPermissions()
+{
+    // Accessibility is tested by doing the real thing rather than by
+    // asking AXIsProcessTrusted(), which caches per process and keeps
+    // saying "no" long after the user has said yes.
+    AXUIElementRef probe = findTrashItem();
+    const bool ax = probe != nullptr;
+    if (probe)
+        CFRelease(probe);
+    const bool disk = fullDiskAccessGranted();
+    if (ax == m_hasAx && disk == m_hasDisk)
+        return;
+    m_hasAx = ax;
+    m_hasDisk = disk;
+    emit permissionsChanged();
+}
 void DockTrashTarget::openRemediation()
 {
     // The system prompt only appears once; after that the user has to be
     // sent to the right settings pane by hand.
-    NSString *pane = accessibilityGranted()
-        ? @"x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
-        : @"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
+    // Whichever is missing, Accessibility first — without it there is no
+    // icon to draw on, so granting disk access alone changes nothing.
+    NSString *pane =
+        !accessibilityGranted()
+            ? @"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+            : @"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles";
     [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:pane]];
 }
 

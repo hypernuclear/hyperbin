@@ -64,4 +64,9 @@ void configureOverlayWindow(QWindow *w)
                            | NSWindowCollectionBehaviorFullScreenAuxiliary;
 }
 
+void activateApp()
+{
+    [NSApp activateIgnoringOtherApps:YES];
+}
+
 } // namespace hyperbin

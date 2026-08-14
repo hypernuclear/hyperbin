@@ -163,20 +163,34 @@ VS Code: `.vscode/launch.json` has the debug configs.
 
 ## Permissions (macOS)
 
-Two, and neither is Full Disk Access. Both are asked for by the app
-itself — no console-only failures:
+Two, and the app watches for both — neither needs a restart once
+granted, and neither fails silently into a console nobody reads.
 
 - **Accessibility** — the only way to get Dock item geometry. If it's
   missing the app shows the system prompt (which carries an "Open System
-  Settings" button), then watches once a second and starts tracking the
-  moment it's granted. No restart needed.
-- **Automation (Finder)** — for the item count. Reading `~/.Trash`
-  directly is TCC-protected and *would* need Full Disk Access; asking
-  Finder needs only an Automation prompt, a far smaller ask for a free
-  app. If FDA happens to be granted we use the direct read instead.
+  Settings" button), then polls once a second and starts tracking the
+  moment it's granted.
+- **Full Disk Access** — to size `~/.Trash`. There is no prompt API for
+  this one; the most any app can do is open the pane. What makes that
+  bearable is that TCC lists an app under Full Disk Access as soon as it
+  *attempts* a protected read — so hyperbin probes the trash on startup
+  and the user finds it already in the list, needing only the switch.
+  `fullDiskAccessGranted()` performs a real `contentsOfDirectoryAtPath:`
+  for exactly that reason: `access()` and `QDir::isReadable()` answer the
+  question without touching anything, and an app that never attempts the
+  read never appears in the list for the user to enable.
 
-`openRemediation()` opens whichever settings pane is the blocker, for
-when the one-shot system prompt has already been dismissed.
+**Size, not item count, drives the effect.** Asking Finder for a count
+needs only Automation and is how this used to work — but Finder returns
+`missing value` for the size of any *folder*, so a trashed app bundle,
+package or project directory weighed nothing, and the count fallback
+ignored the Trash Threshold setting outright, which made that whole menu
+a no-op on a stock Mac. Without disk access the app now draws nothing and
+says so, rather than drawing something quietly wrong.
+
+`openRemediation()` opens whichever pane is the blocker — Accessibility
+first, since without it there is no icon to draw on and granting disk
+access alone would change nothing.
 
 **The build MUST be signed with a stable identity** — the CMake post-build
 step does this with the Developer ID. Without it the bundle is ad-hoc /

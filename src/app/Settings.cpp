@@ -131,13 +131,20 @@ double Settings::fullnessFor(qint64 trashBytes, int itemCount) const
         break;
     }
 
-    // Relative. Size is the better signal — one 4GB video is more rubbish
-    // than forty screenshots — but it isn't always available: reading
-    // ~/.Trash needs Full Disk Access, and without it the platform layer
-    // can only get a count out of Finder. Fall back rather than showing
-    // nothing.
+    // Relative, and measured in BYTES. One 4GB video is more rubbish than
+    // forty screenshots, so the count is a poor signal and is no longer
+    // used for this — the platform layer either has Full Disk Access and
+    // knows the size, or reports nothing and the effect does not run.
+    //
+    // There used to be a count-based fallback here for the case where
+    // only Finder could be asked. Finder can size files but returns
+    // "missing value" for folders, so a trashed app bundle or project
+    // directory weighed nothing at all; and the fallback ignored the
+    // threshold entirely, so the whole Trash Threshold menu silently did
+    // nothing on a stock Mac.
+    Q_UNUSED(itemCount);
     if (trashBytes < 0)
-        return std::clamp(itemCount / 40.0, 0.0, 1.0);
+        return 0.0;
     if (trashBytes == 0)
         return 0.0;
     return std::clamp(double(trashBytes) / double(thresholdBytes()), 0.0, 1.0);

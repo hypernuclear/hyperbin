@@ -36,11 +36,25 @@ public:
     void   stop() override;
     void   setAnimating(bool animating) override;
     void   openRemediation() override;
+    QList<Permission> permissions() const override;
+    void   openPermission(const QString &id) override;
+    void   refreshPermissions() override;
     QImage iconImage(int px) const override;
 
     /// True once the user has granted Accessibility. Prompts on first call
     /// if `prompt` is set — only do that from onboarding, never silently.
     static bool accessibilityGranted(bool prompt = false);
+    /// True once the user has granted Full Disk Access, tested by
+    /// ATTEMPTING to list the trash.
+    ///
+    /// The attempt matters as much as the answer. There is no API to
+    /// prompt for Full Disk Access — the most an app can do is send the
+    /// user to the settings pane — and an app only appears in that pane
+    /// once it has actually tried to touch something protected. So this
+    /// call is what puts hyperbin in the list for the user to switch on;
+    /// without it they would have to add the bundle by hand with the
+    /// "+" button.
+    static bool fullDiskAccessGranted();
 
 private:
     void beginTracking();  // the real start, once permission exists
@@ -48,11 +62,6 @@ private:
     void pollTrash();      // stat is free; the real count only on a change
     void setStatus(Status s);
 
-    /// Item count via Finder Apple Events. Needs Automation permission —
-    /// a prompt the user can say yes to — rather than Full Disk Access,
-    /// which is what reading ~/.Trash directly would require. Returns -1
-    /// if Finder refused or wasn't reachable.
-    static int countViaFinder();
 
     struct Impl;           // holds the AXUIElementRef, kept out of the header
     Impl  *d = nullptr;
@@ -72,7 +81,12 @@ private:
     QTimer    m_permissionWatch; // runs only while waiting to be granted
     int       m_trashTick = 0;   // divides the icon poll down for the count
     QDateTime m_trashMTime;
-    bool      m_directRead = false; // true when ~/.Trash is readable outright
+    QTimer    m_diskWatch;   // runs only while waiting for Full Disk Access
+    /// Cached, because asking is not free: the honest test for disk
+    /// access is a directory listing and the honest test for
+    /// Accessibility is a Dock round-trip. The watchers above own these.
+    bool      m_hasAx   = false;
+    bool      m_hasDisk = false;
     bool      m_animating  = true;  // drives the fast/slow poll choice
 };
 

@@ -26,12 +26,35 @@ public:
     enum class Status {
         Ok,
         PermissionRequired, // macOS: Accessibility not granted
+        DiskAccessRequired, // macOS: Full Disk Access not granted
         IconHidden,         // Windows: Recycle Bin not shown on desktop
         NotFound,           // couldn't locate it; transient or unsupported shell
     };
     Q_ENUM(Status)
 
     virtual Status status() const = 0;
+    /// One thing the OS needs the user to allow before this can work.
+    ///
+    /// A list rather than a status, because the onboarding window has to
+    /// show every permission at once with its own state and its own
+    /// button — a single "what is blocking me" answer can only ever
+    /// describe the first one. Empty on platforms that need none:
+    /// Windows reads the Recycle Bin without asking anybody.
+    struct Permission {
+        QString id;      ///< opaque; handed back to openPermission()
+        QString title;   ///< "Accessibility"
+        QString detail;  ///< what it buys, in the user's terms
+        bool    granted = false;
+    };
+    virtual QList<Permission> permissions() const { return {}; }
+    /// Open the settings pane for one of them. There is no API to prompt
+    /// for most of these; opening the pane is the whole of what an app
+    /// can do.
+    virtual void openPermission(const QString &id) { Q_UNUSED(id); }
+    /// Re-test them. Costs a directory listing and a Dock round-trip, so
+    /// the onboarding window drives this while it is open rather than
+    /// anything running it continuously.
+    virtual void refreshPermissions() {}
 
     /// Screen rect of the icon, in device-independent pixels. Only
     /// meaningful when status() == Ok.
@@ -71,6 +94,9 @@ public:
     virtual QImage iconImage(int px) const { Q_UNUSED(px); return {}; }
 
 signals:
+    /// One of permissions() changed state. Polled, not pushed — the OS
+    /// does not notify anyone when a switch is flicked.
+    void permissionsChanged();
     /// Icon moved or resized — the overlay must follow.
     void iconRectChanged(const QRect &r);
     /// Item count changed.

@@ -272,6 +272,13 @@ void TrayMenu::build()
         });
     }
 
+    // Permissions. Always here once the platform needs any, not only
+    // while something is broken: a user who dismissed the window at
+    // first run, or who revoked access later, needs a way back to it, and
+    // hunting through System Settings is not one.
+    m_perms = m_menu->addAction(QString());
+    m_perms->setVisible(false);
+    connect(m_perms, &QAction::triggered, this, &TrayMenu::remediationRequested);
     auto *quit = m_menu->addAction(QStringLiteral("Quit hyperbin"));
     connect(quit, &QAction::triggered, this, &TrayMenu::quitRequested);
 
@@ -316,6 +323,19 @@ void TrayMenu::setStatusText(const QString &text)
         m_status->setText(text);
 }
 
+void TrayMenu::setPermissionState(int count, int missing)
+{
+    if (!m_perms)
+        return;
+    m_perms->setVisible(count > 0);
+    if (count <= 0)
+        return;
+    // The warning sign only when there is something to warn about. A
+    // permanent alarm next to a working app teaches the user to ignore
+    // it, which is the one thing this entry cannot afford.
+    m_perms->setText(missing > 0 ? QStringLiteral("Grant Permissions \u26a0\ufe0f")
+                                 : QStringLiteral("Show Permissions"));
+}
 void TrayMenu::setProblem(const QString &text, bool actionable)
 {
     if (!m_problem)

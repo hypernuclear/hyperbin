@@ -609,10 +609,16 @@ int main(int argc, char **argv)
         s.setThreshold(Settings::Threshold::OneGB);
         if (std::abs(s.fullnessFor(50 * mb, 3) - 50.0 / 1024.0) > 1e-9)
             return fail("threshold change does not rescale");
-        // No size available (no Full Disk Access) must fall back to the
-        // count rather than reporting an empty bin.
-        if (s.fullnessFor(-1, 20) <= 0.0)
-            return fail("unreadable trash size should fall back to the count");
+        // No size available means no Full Disk Access, and there is no
+        // longer a count to fall back to. Deliberate: Finder can be asked
+        // for a count without Full Disk Access but returns "missing
+        // value" for the size of any FOLDER, so a trashed app bundle or
+        // project directory weighed nothing — and the count fallback
+        // ignored the threshold outright, which made the whole Trash
+        // Threshold menu a no-op on a stock Mac. Better to draw nothing
+        // and say why than to draw something quietly wrong.
+        if (s.fullnessFor(-1, 20) != 0.0)
+            return fail("without a size, fullness must be zero, not guessed");
         s.clearStore();
         std::printf("density: thirds, relative scaling and fallback all hold\n");
     }

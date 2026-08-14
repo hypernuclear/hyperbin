@@ -444,6 +444,41 @@ int main(int argc, char **argv)
     QObject::connect(target.get(), &TrashTarget::statusChanged, &tray,
                      [&](TrashTarget::Status) { refreshProblem(); });
 
+    // --- the brand moment -------------------------------------------------
+    // Once, ever. A background agent that puts up a window every launch
+    // is a nuisance; one that does it on the first run is an
+    // introduction, and it is the only moment this app has to make one.
+    //
+    // HYPERBIN_SPLASH=1 forces it back for development, and deliberately
+    // does NOT mark it seen. Testing the splash used to consume the
+    // user's one real first run, so every check of "does it appear?"
+    // guaranteed the answer would be no the next time anybody looked —
+    // including on the machine of whoever was about to try it.
+    const bool forcedSplash = qEnvironmentVariableIntValue("HYPERBIN_SPLASH") != 0;
+    QPointer<QQuickWindow> splashWindow;
+    if (!settings.splashSeen() || forcedSplash) {
+        QQmlComponent splashComponent(
+            &engine, QUrl(QStringLiteral("qrc:/qt/qml/hyperbin/qml/Splash.qml")));
+        splashWindow = qobject_cast<QQuickWindow *>(splashComponent.create());
+        if (splashWindow) {
+            // Centred by hand: a frameless splash has no window manager
+            // placement to inherit, so it would otherwise land wherever
+            // the platform felt like putting it.
+            if (QScreen *sc = QGuiApplication::primaryScreen()) {
+                const QRect a = sc->availableGeometry();
+                splashWindow->setPosition(
+                    a.center() - QPoint(splashWindow->width() / 2,
+                                        splashWindow->height() / 2));
+            }
+            QMetaObject::invokeMethod(splashWindow, "appear");
+            activateApp();
+            if (!forcedSplash)
+                settings.setSplashSeen();
+        } else {
+            qWarning("hyperbin: splash failed to load: %s",
+                     qPrintable(splashComponent.errorString()));
+        }
+    }
     // --- onboarding -------------------------------------------------------
     // Shown when something the app needs is switched off, and reachable
     // afterwards from the menu bar. macOS cannot prompt for Full Disk
@@ -489,14 +524,34 @@ int main(int argc, char **argv)
         permBridge.publish();
         refreshPermissionEntry();
     });
-    refreshPermissionEntry();
     {
+        // Ask the OS before deciding, rather than reading the cache.
+        //
+        // The cache is populated by the target's own start-up probe,
+        // which happens further down — so at this point both flags are
+        // still at their "not yet tested" default of false. Trusting them
+        // put the window up on every launch, granted or not, and then
+        // closed it again a moment later when the real answer arrived.
+        // A window that appears and vanishes is worse than one that
+        // never appears: it reads as a fault.
+        target->refreshPermissions();
+        refreshPermissionEntry();
         bool missing = false;
         for (const TrashTarget::Permission &p : target->permissions())
             if (!p.granted)
                 missing = true;
-        if (missing)
-            showPermissions();
+        // ...and never over the splash. They would stack, and the point
+        // of a brand moment is that it is the only thing on screen.
+        if (missing) {
+            if (splashWindow && splashWindow->isVisible())
+                QObject::connect(splashWindow, &QWindow::visibleChanged, &app,
+                                 [showPermissions](bool vis) {
+                                     if (!vis)
+                                         showPermissions();
+                                 });
+            else
+                showPermissions();
+        }
     }
     // The menu bar's problem line opens the window rather than jumping
     // straight to a settings pane: when two permissions are missing, a

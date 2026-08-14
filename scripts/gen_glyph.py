@@ -16,7 +16,8 @@ fill_rule = ('ShapePath.OddEvenFill' if rule and rule.group(1) == 'evenodd'
              else 'ShapePath.WindingFill')
 
 # Wrap into C++ string literal chunks so the source stays readable.
-chunks = textwrap.wrap(d, 88, break_long_words=True, break_on_hyphens=False)
+# Sliced at fixed offsets, NOT textwrap.wrap(). Path data is
+chunks = [d[i:i + 88] for i in range(0, len(d), 88)]
 lit = '\n'.join('    "%s"' % c.replace('\\', '\\\\').replace('"', '\\"') for c in chunks)
 
 INC = '#include'

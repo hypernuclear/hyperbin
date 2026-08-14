@@ -147,7 +147,14 @@ qt_add_shaders(hyperbin "hyperbin_shaders"
 qt_add_qml_module(hyperbin
     URI hyperbin
     VERSION 1.0
-    QML_FILES qml/Main.qml qml/BinGlyph.qml qml/OozeVisual.qml qml/Permissions.qml
+    QML_FILES
+        qml/Main.qml
+        qml/BinGlyph.qml
+        qml/OozeVisual.qml
+        qml/Permissions.qml
+        qml/Splash.qml
+        qml/HyperbinWordmark.qml
+        qml/HypernuclearWordmark.qml
 )
 
 # qmltyperegistrations.cpp includes the QML_ELEMENT headers by basename,
@@ -170,6 +177,7 @@ qt_add_resources(hyperbin "hyperbin_icons"
     FILES
         resources/hyperbin.svg
         resources/env.hdr
+        resources/splash.jpg
 )
 qt_add_resources(hyperbin "hyperbin_shaders3d"
     PREFIX "/shaders3d"

@@ -47,6 +47,8 @@ signals:
     void quitRequested();
     /// The problem line, or the permissions entry, was clicked.
     void remediationRequested();
+    /// "Show Splash" was chosen.
+    void splashRequested();
 
 private:
     void build();

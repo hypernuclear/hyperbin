@@ -13,8 +13,12 @@ import QtQuick.Effects
 Window {
     id: win
 
-    /// Seconds on screen before it leaves by itself. A brand moment that
-    /// outstays its welcome stops being one.
+    /// Milliseconds on screen before it leaves by itself. A brand moment
+    /// that outstays its welcome stops being one.
+    ///
+    /// Zero means it stays until clicked. That is the right behaviour
+    /// when the user asked to see it: something opened on request should
+    /// not take itself away again while they are still looking at it.
     property int dwellMs: 4000
 
     // Sized from the artwork's own aspect so it is never letterboxed or
@@ -134,7 +138,10 @@ Window {
     function appear() {
         visible = true;
         opacity = 1;
-        dwell.restart();
+        if (dwellMs > 0)
+            dwell.restart();
+        else
+            dwell.stop();
     }
     function dismiss() {
         dwell.stop();

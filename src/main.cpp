@@ -456,28 +456,38 @@ int main(int argc, char **argv)
     // including on the machine of whoever was about to try it.
     const bool forcedSplash = qEnvironmentVariableIntValue("HYPERBIN_SPLASH") != 0;
     QPointer<QQuickWindow> splashWindow;
-    if (!settings.splashSeen() || forcedSplash) {
-        QQmlComponent splashComponent(
-            &engine, QUrl(QStringLiteral("qrc:/qt/qml/hyperbin/qml/Splash.qml")));
-        splashWindow = qobject_cast<QQuickWindow *>(splashComponent.create());
-        if (splashWindow) {
-            // Centred by hand: a frameless splash has no window manager
-            // placement to inherit, so it would otherwise land wherever
-            // the platform felt like putting it.
-            if (QScreen *sc = QGuiApplication::primaryScreen()) {
-                const QRect a = sc->availableGeometry();
-                splashWindow->setPosition(
-                    a.center() - QPoint(splashWindow->width() / 2,
-                                        splashWindow->height() / 2));
-            }
-            QMetaObject::invokeMethod(splashWindow, "appear");
-            activateApp();
-            if (!forcedSplash)
-                settings.setSplashSeen();
-        } else {
+    QQmlComponent splashComponent(
+        &engine, QUrl(QStringLiteral("qrc:/qt/qml/hyperbin/qml/Splash.qml")));
+    // dwellMs of 0 means "stay until clicked" — see qml/Splash.qml. The
+    // automatic version is for the introduction nobody asked for; the
+    // manual one is for someone who went looking, and taking it away from
+    // them on a timer would be rude.
+    auto showSplash = [&, forcedSplash](int dwellMs) {
+        if (!splashWindow)
+            splashWindow = qobject_cast<QQuickWindow *>(splashComponent.create());
+        if (!splashWindow) {
             qWarning("hyperbin: splash failed to load: %s",
                      qPrintable(splashComponent.errorString()));
+            return;
         }
+        splashWindow->setProperty("dwellMs", dwellMs);
+        // Centred by hand: a frameless splash has no window manager
+        // placement to inherit, so it would otherwise land wherever the
+        // platform felt like putting it. Recomputed each time, because
+        // the display it should appear on may have changed since.
+        if (QScreen *sc = QGuiApplication::primaryScreen()) {
+            const QRect a = sc->availableGeometry();
+            splashWindow->setPosition(a.center()
+                                      - QPoint(splashWindow->width() / 2,
+                                               splashWindow->height() / 2));
+        }
+        QMetaObject::invokeMethod(splashWindow, "appear");
+        activateApp();
+    };
+    if (!settings.splashSeen() || forcedSplash) {
+        showSplash(4000);
+        if (!forcedSplash)
+            settings.setSplashSeen();
     }
     // --- onboarding -------------------------------------------------------
     // Shown when something the app needs is switched off, and reachable
@@ -558,6 +568,9 @@ int main(int argc, char **argv)
     // single jump can only ever address one of them.
     QObject::connect(&tray, &TrayMenu::remediationRequested, &app,
                      [&] { showPermissions(); });
+    // Asked for, so it waits to be dismissed rather than timing out.
+    QObject::connect(&tray, &TrayMenu::splashRequested, &app,
+                     [&] { showSplash(0); });
 
     // --- master switch ----------------------------------------------------
     // Off means genuinely off: no frames, no overlay surface, and the

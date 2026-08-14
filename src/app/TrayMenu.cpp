@@ -279,6 +279,11 @@ void TrayMenu::build()
     m_perms = m_menu->addAction(QString());
     m_perms->setVisible(false);
     connect(m_perms, &QAction::triggered, this, &TrayMenu::remediationRequested);
+    // The splash, on demand. It shows itself once ever, which is right
+    // for an introduction and useless for anyone who wants to look at it
+    // again — so this is the way back to it.
+    auto *splash = m_menu->addAction(QStringLiteral("Show Splash"));
+    connect(splash, &QAction::triggered, this, &TrayMenu::splashRequested);
     auto *quit = m_menu->addAction(QStringLiteral("Quit hyperbin"));
     connect(quit, &QAction::triggered, this, &TrayMenu::quitRequested);
 

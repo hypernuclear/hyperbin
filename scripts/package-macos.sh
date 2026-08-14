@@ -91,13 +91,96 @@ done
 # --- Qt --------------------------------------------------------------------
 # macdeployqt copies the Qt frameworks and QML modules in. It runs before
 # signing, because it rewrites the very binaries that get signed.
-if [ -n "${QT_ROOT_DIR:-}" ] && [ -x "$QT_ROOT_DIR/bin/macdeployqt" ]; then
-    MACDEPLOYQT="$QT_ROOT_DIR/bin/macdeployqt"
-else
-    MACDEPLOYQT="$(command -v macdeployqt || true)"
+# Which macdeployqt matters more than it looks.
+#
+# Falling back to PATH found Anaconda's **Qt5** macdeployqt here, and it
+# fails in a way that looks like success: it follows the binary's real
+# dependencies, so the Qt6 frameworks land correctly, then it deploys
+# Qt5 plugins and Qt5 QML modules (QtQuick.2, QtGraphicalEffects) and
+# never deploys the Qt6 ones. The DMG builds, signs, notarizes and runs
+# perfectly on the build machine — which has Qt6 installed — and dies on
+# every other machine with "module QtQuick is not installed". It also
+# added ~70 MB of dead Qt5 and ICU.
+#
+# So the build's own CMakeCache wins: that is the Qt the binary was
+# actually linked against, and it cannot disagree with itself.
+MACDEPLOYQT=""
+if [ -f "$BUILD_DIR/CMakeCache.txt" ]; then
+    QT_PREFIX=$(sed -n 's|^Qt6_DIR:PATH=\(.*\)/lib/cmake/Qt6$|\1|p' \
+                    "$BUILD_DIR/CMakeCache.txt" | awk 'NR==1')
+    [ -n "$QT_PREFIX" ] && [ -x "$QT_PREFIX/bin/macdeployqt" ] \
+        && MACDEPLOYQT="$QT_PREFIX/bin/macdeployqt"
 fi
+if [ -z "$MACDEPLOYQT" ] && [ -n "${QT_ROOT_DIR:-}" ] \
+   && [ -x "$QT_ROOT_DIR/bin/macdeployqt" ]; then
+    MACDEPLOYQT="$QT_ROOT_DIR/bin/macdeployqt"
+fi
+[ -n "$MACDEPLOYQT" ] || MACDEPLOYQT="$(command -v macdeployqt || true)"
 [ -n "$MACDEPLOYQT" ] || { echo "macdeployqt not found" >&2; exit 1; }
+
+# Whatever it was found by, it has to be Qt6. Qt5's links libQt5Core;
+# Qt6's links QtCore.framework.
+if otool -L "$MACDEPLOYQT" 2>/dev/null | grep -q "libQt5"; then
+    echo "ERROR: $MACDEPLOYQT is a Qt5 tool; this is a Qt6 app." >&2
+    echo "       It would deploy Qt5 QML modules and omit the Qt6 ones," >&2
+    echo "       producing a bundle that only runs on this machine." >&2
+    echo "       Set QT_ROOT_DIR, or configure the build so CMakeCache" >&2
+    echo "       names Qt6_DIR." >&2
+    exit 1
+fi
+echo "macdeployqt: $MACDEPLOYQT"
 "$MACDEPLOYQT" "$APP" -qmldir="$REPO_ROOT/qml" -verbose=1
+
+# --- prune what macdeployqt guessed at ---------------------------------------
+#
+# Its QML import scan is speculative: it walks the *modules* our imports
+# could reach rather than the ones they do, and bundles the union. The
+# app imports QtQuick, Controls, Effects, Layouts, Shapes and QtQuick3D —
+# no audio, no video, no dialogs, no database, no 3D asset loading (the
+# geometry is generated in OozeGeometry.cpp).
+#
+# Left alone that is ~70 MB nothing can reach. Pruned here rather than
+# relying on CI happening to install a smaller Qt: the modules below are
+# separate aqt packages the release workflow does not ask for, so CI
+# produces a smaller bundle by luck, and the day someone adds a module
+# for an unrelated reason the download quietly doubles. Doing it
+# explicitly makes local and CI agree and makes the intent reviewable.
+#
+# Must run BEFORE signing — anything added or removed afterwards breaks
+# the seal.
+prune() {
+    local before after
+    before=$(du -sm "$APP" | cut -f1)
+    rm -rf "$@"
+    after=$(du -sm "$APP" | cut -f1)
+    echo "  pruned $((before - after)) MB"
+}
+
+# The legacy Qt3D stack. NOT QtQuick3D, which the ooze effect does use —
+# macdeployqt drags all nine Qt3D frameworks in via QtQuick/Scene3D, and
+# sceneparsers/geometryloaders/renderers are Qt3D-only plugin categories.
+echo "pruning Qt3D:"
+prune "$APP/Contents/Resources/qml/QtQuick/Scene3D" \
+      "$APP"/Contents/Frameworks/Qt3D*.framework \
+      "$APP/Contents/PlugIns/sceneparsers" \
+      "$APP/Contents/PlugIns/geometryloaders" \
+      "$APP/Contents/PlugIns/renderers"
+
+# Multimedia, and the FFmpeg backend behind it. libavcodec alone is 28 MB.
+echo "pruning multimedia:"
+prune "$APP/Contents/PlugIns/multimedia" \
+      "$APP"/Contents/Frameworks/QtMultimedia*.framework \
+      "$APP"/Contents/Frameworks/libav*.dylib \
+      "$APP"/Contents/Frameworks/libsw*.dylib \
+      "$APP/Contents/Resources/qml/QtMultimedia"
+
+# Database drivers, physics, and the file/colour dialogs — none reachable.
+echo "pruning unused modules:"
+prune "$APP/Contents/PlugIns/sqldrivers" \
+      "$APP"/Contents/Frameworks/QtSql.framework \
+      "$APP"/Contents/Frameworks/QtQuick3DPhysics*.framework \
+      "$APP"/Contents/Frameworks/QtQuickDialogs2*.framework \
+      "$APP/Contents/Resources/qml/QtQuick/Dialogs"
 
 # --- signing ---------------------------------------------------------------
 IDENTITY="${CODESIGN_IDENTITY:-}"

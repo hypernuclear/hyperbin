@@ -1,6 +1,6 @@
 // The hypernuclear wordmark.
 //
-// Generated from the supplied SVG by scripts/gen_wordmark.py. A Shape
+// Generated from the SVG by scripts/gen_mark.py. A Shape
 // rather than an image so the colour is a property: this sits on a busy
 // illustration in one place and could sit on anything later, and a
 // baked-in black would be invisible on half of them.

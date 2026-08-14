@@ -70,39 +70,32 @@ Window {
             smooth: true
         }
 
-        // Scrims, top and bottom.
+        // The lockup: bin mark, then wordmark, centred across the top
+        // where the artwork is a night sky and has the least going on.
         //
-        // The illustration is busy everywhere — measured, the quietest
-        // patch still has a brightness spread of about fifty — so a plain
-        // white wordmark laid on it competes with whatever is underneath
-        // and loses. These darken just the two bands the marks sit in and
-        // leave the middle, which is the part worth looking at, alone.
-        Rectangle {
-            anchors { left: parent.left; right: parent.right; top: parent.top }
-            height: parent.height * 0.30
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: "#cc000000" }
-                GradientStop { position: 1.0; color: "#00000000" }
-            }
-        }
-        Rectangle {
-            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-            height: parent.height * 0.26
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: "#00000000" }
-                GradientStop { position: 1.0; color: "#cc000000" }
-            }
-        }
-
-        // The product mark, centred across the top where the artwork is a
-        // night sky and has the least going on.
-        HyperbinWordmark {
-            color: "#ffffff"
-            width: parent.width * 0.34
-            height: width * (viewHeight / viewWidth)
+        // Sized off the wordmark's cap height rather than its full box —
+        // the wordmark's viewBox includes the descender on the 'y' and
+        // the 'p', so matching box heights would leave the mark visibly
+        // taller than the letters it sits beside.
+        Row {
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.top: parent.top
             anchors.topMargin: parent.height * 0.075
+            spacing: wordmark.height * 0.42
+            BinGlyph {
+                color: "#ffffff"
+                height: wordmark.height * 1.62
+                width: height * (viewWidth / viewHeight)
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            HyperbinWordmark {
+                id: wordmark
+                color: "#ffffff"
+                width: parentWidth * 0.30
+                height: width * (viewHeight / viewWidth)
+                anchors.verticalCenter: parent.verticalCenter
+                readonly property real parentWidth: body.width
+            }
         }
 
 

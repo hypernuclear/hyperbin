@@ -17,8 +17,12 @@ namespace hyperbin {
 
 namespace {
 
-/// Sizes the menu-bar icon is rendered at. macOS asks for @1x and @2x;
+/// HEIGHTS the menu-bar icon is rendered at. macOS asks for @1x and @2x;
 /// giving both means the shell never has to scale a bitmap.
+///
+/// Heights, not sizes: the shell scales the image to the bar's thickness
+/// and the width follows, so height is the only dimension that decides
+/// how big the mark looks.
 constexpr int kIconPx[] = {22, 44, 66};
 
 /// Padding around the glyph, as a fraction of the icon box. The artwork
@@ -118,16 +122,26 @@ QIcon TrayMenu::trayIcon()
 
     const QColor fill = glyphColor();
     QIcon icon;
+    // The pixmap takes the INK's aspect rather than being square.
+    //
+    // A square one wastes whichever dimension the mark is shorter in, and
+    // the shell scales the whole image to the bar's thickness — so a mark
+    // wider than it is tall ended up drawn at its own aspect inside a
+    // square that was itself scaled down to fit, losing height twice. The
+    // bin mark is about 1.15:1, which was costing it a seventh of its
+    // size against nothing but transparent pixels.
+    const qreal aspect = ink.width() / ink.height();
     for (int px : kIconPx) {
-        QPixmap pm(px, px);
+        const int w = qMax(1, qRound(px * aspect));
+        QPixmap pm(w, px);
         pm.fill(Qt::transparent);
         QPainter p(&pm);
         p.setRenderHint(QPainter::Antialiasing, true);
         // Scale the INK to fill the icon, preserving its aspect ratio,
         // instead of scaling the viewBox and inheriting its dead space.
-        const qreal avail = px * (1.0 - 2 * kInset);
-        const qreal s = qMin(avail / ink.width(), avail / ink.height());
-        const QRectF box((px - ink.width() * s) / 2.0,
+        const qreal s = qMin(w * (1.0 - 2 * kInset) / ink.width(),
+                             px * (1.0 - 2 * kInset) / ink.height());
+        const QRectF box((w - ink.width() * s) / 2.0,
                          (px - ink.height() * s) / 2.0,
                          ink.width() * s, ink.height() * s);
         p.save();

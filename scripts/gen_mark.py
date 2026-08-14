@@ -1,5 +1,8 @@
 import re, sys, textwrap
 def gen(svg_text, component, doc):
+    rule = re.search(r'fill-rule="(\w+)"', svg_text)
+    fill_rule = ('ShapePath.OddEvenFill' if rule and rule.group(1) == 'evenodd'
+                 else 'ShapePath.WindingFill')
     vb = re.search(r'viewBox="0 0 ([\d.]+) ([\d.]+)"', svg_text)
     w, h = vb.group(1), vb.group(2)
     paths = re.findall(r'<path d="([^"]+)"', svg_text)
@@ -13,12 +16,12 @@ def gen(svg_text, component, doc):
             '        ShapePath {\n'
             '            strokeColor: "transparent"\n'
             '            fillColor: root.color\n'
-            '            fillRule: ShapePath.WindingFill\n'
+            f'            fillRule: {fill_rule}\n'
             f'            PathSvg {{ path: {first}\n{lit} }}\n'
             '        }')
     return f'''// {doc}
 //
-// Generated from the supplied SVG by scripts/gen_wordmark.py. A Shape
+// Generated from the SVG by scripts/gen_mark.py. A Shape
 // rather than an image so the colour is a property: this sits on a busy
 // illustration in one place and could sit on anything later, and a
 // baked-in black would be invisible on half of them.

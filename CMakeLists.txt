@@ -89,8 +89,6 @@ qt_standard_project_setup(REQUIRES 6.11)
 
 qt_add_executable(hyperbin
     src/main.cpp
-    src/app/BinGlyph.cpp
-    src/app/BinGlyph.h
     src/app/Settings.cpp
     src/app/Settings.h
     src/app/TrayMenu.cpp

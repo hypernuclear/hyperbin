@@ -13,6 +13,7 @@
 #include <QImage>
 #include <QSizeF>
 #include <QVector>
+#include <QVector3D>
 
 namespace hyperbin {
 
@@ -79,6 +80,25 @@ public:
     float rimY() const { return m_shape.rimY(); }
     float rimRadius() const { return m_shape.rimRadius(); }
     QObject *iconTexture() const;
+
+    /// Where to put an eye, in bin-local units.
+    ///
+    /// The scene cannot work this out for itself: the body's half-width
+    /// at a given height comes from the measured silhouette, and that
+    /// lives here. Reusing it means an eye is placed against the same
+    /// profile the mesh is swept from, so the two cannot drift apart —
+    /// the same reason OozeGeometry asks rather than measuring again.
+    ///
+    /// @param t     0 at the pool, 1 at the gel's surface.
+    /// @param angle radians around the bin's axis; 0 faces the camera.
+    /// @param sink  fraction of the body's half-width to sit at. Below 1
+    ///              the eye is buried, at 1 its centre is on the surface
+    ///              and half of it stands proud. The vertex shader then
+    ///              displaces the surface over it, so the same value
+    ///              submerges an eye where the gel bulges and exposes it
+    ///              where the gel thins — which is the variation that
+    ///              makes them look suspended rather than stuck on.
+    Q_INVOKABLE QVector3D eyeAt(float t, float angle, float sink) const;
 
     const OozeSim &sim() const { return m_sim; }
     /// The gel's silhouette, measured from the bin's artwork. Read by

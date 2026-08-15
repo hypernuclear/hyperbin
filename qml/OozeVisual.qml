@@ -88,6 +88,15 @@ Item {
                              - root.width / 2 : 0
             y: root.effect ? -(root.effect.binRect.y + root.effect.binRect.height / 2
                                - root.height / 2) : 0
+        // The eyes go in BEFORE the gel in the scene graph so the gel's
+        // transparent pass composites over them — an eye drawn after it
+        // sits on top of the body instead of inside it.
+        OozeEyes {
+            effect: root.effect
+            camTilt: cam.tilt
+            binWidth: root.binW
+        }
+
         Model {
             id: sludge
             geometry: OozeGeometry {

@@ -117,6 +117,20 @@ QMargins OozeEffect::margins(qreal iconSize) const
                     x, OozeSim::marginBottom(iconSize));
 }
 
+QVector3D OozeEffect::eyeAt(float t, float angle, float sink) const
+{
+    // Between the pool's crest and the gel's surface. Not the very
+    // bottom: an eye down in the puddle is behind the widest part of the
+    // body from a camera that looks slightly down, so it never shows.
+    const float lo = m_shape.poolCrest();
+    const float hi = m_shape.surfaceY(m_contentLine, m_sim.level());
+    const float y = lo + (hi - lo) * qBound(0.0f, t, 1.0f);
+
+    const float r = m_shape.radiusAt(y) * sink;
+    // angle 0 puts the eye on +z, which is the side the camera is on.
+    return QVector3D(r * std::sin(angle), y, r * std::cos(angle));
+}
+
 } // namespace hyperbin
 
 #include "OozeEffect.moc"

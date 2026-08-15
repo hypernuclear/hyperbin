@@ -72,7 +72,14 @@ Window {
                 // margins are proportional to the icon, so this is the
                 // same geometry the Dock produces, just larger.
                 binRect = Qt.rect(90, 40, 300, 300);
-                fullness = 0.85;
+                // HYPERBIN_PREVIEW_FULL pins the slider, so anything that
+                // scales with fullness — the ooze's level, how many eyes
+                // surface — can be shot at a chosen value instead of
+                // being dragged to it by hand.
+                fullness = Number(Qt.application.arguments.indexOf("--full") >= 0
+                                  ? Qt.application.arguments[
+                                        Qt.application.arguments.indexOf("--full") + 1]
+                                  : 0.85);
                 frameIntervalMs = 16;
             }
         }

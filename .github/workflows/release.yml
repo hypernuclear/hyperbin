@@ -342,9 +342,24 @@ jobs:
           # reads a whole directory and emits one <item> per archive; it
           # has no notion of architecture, so the two are produced apart
           # and the sparkle:cpu attribute is added on the way in.
+          # Located with find, never by a constructed path.
+          #
+          # upload-artifact@v4 roots an artifact at the least common
+          # ancestor of everything it matched. This job's upload lists
+          # both `build/*.zip` and `build-version.txt`, so that ancestor
+          # is the workspace and the files arrive under
+          # artifacts/<name>/build/… — not artifacts/<name>/. Building the
+          # path by hand assumed otherwise and failed here after all three
+          # platforms had signed and notarized.
           for ARCH in arm64 x64; do
             mkdir -p "feed-$ARCH"
-            cp artifacts/hyperbin-macos-$ARCH/hyperbin-${VERSION}-macos-${ARCH}.zip "feed-$ARCH/"
+            ZIP=$(find artifacts -type f -name "hyperbin-*-macos-${ARCH}.zip" | head -1)
+            if [ -z "$ZIP" ]; then
+              echo "::error::no macOS ${ARCH} zip in the artifacts"
+              find artifacts -type f | sed 's/^/  /'
+              exit 1
+            fi
+            cp "$ZIP" "feed-$ARCH/"
             ./sparkle/bin/generate_appcast --ed-key-file "$KEY" \
               --download-url-prefix "${CDN_URL}/releases/${VERSION}/" \
               "feed-$ARCH/"
@@ -387,8 +402,15 @@ jobs:
 
       - name: Build the Windows appcast
         run: |
-          EXE="artifacts/hyperbin-windows-x64/hyperbin-${VERSION}-windows-x64.exe"
-          SIG=$(cat artifacts/hyperbin-windows-x64/eddsa-signature.txt)
+          # find, not a constructed path — see the macOS appcast step.
+          EXE=$(find artifacts -type f -name "hyperbin-*-windows-x64.exe" | head -1)
+          SIGFILE=$(find artifacts -type f -name "eddsa-signature.txt" | head -1)
+          if [ -z "$EXE" ] || [ -z "$SIGFILE" ]; then
+            echo "::error::missing Windows installer or its EdDSA signature"
+            find artifacts -type f | sed 's/^/  /'
+            exit 1
+          fi
+          SIG=$(cat "$SIGFILE")
           LEN=$(stat -f%z "$EXE")
           BUILD=$(git rev-list --count "$GITHUB_REF_NAME")
           # sparkle:version is the build number WinSparkle compares;

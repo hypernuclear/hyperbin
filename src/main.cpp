@@ -549,7 +549,13 @@ int main(int argc, char **argv)
                                                splashWindow->height() / 2));
         }
         QMetaObject::invokeMethod(splashWindow, "appear");
+#if defined(Q_OS_MACOS)
+        // Same reason as the permissions window: an accessory app is not
+        // in the activation order, so a window it opens lands behind
+        // whatever the user was looking at. Declared in MacOverlay.h,
+        // which only compiles on Darwin — hence the guard.
         activateApp();
+#endif
     };
     showSplash(4000);
     // The permissions window comes after, never over. They would stack,

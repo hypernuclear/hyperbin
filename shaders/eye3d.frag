@@ -77,24 +77,86 @@ void MAIN()
     // of numbers closes all of them the same way. It cannot go degenerate
     // here: no gaze turns more than about a third of a right angle off
     // the lens, and the camera's up is square to that.
-    vec3 up = normalize(camUp - gazeW * dot(camUp, gazeW));
-    float lat = dot(vDirW, up);
+    vec3 up0 = normalize(camUp - gazeW * dot(camUp, gazeW));
+    // ...and then CANTED, by its own angle per eye.
+    //
+    // Lids square to the horizon are the giveaway. Every real set sits on
+    // a tilted axis — the outer corner higher than the inner — and a
+    // whole bin of them closing along exactly the same line reads as nine
+    // copies of one thing rather than nine of a kind. The roll turns the
+    // whole aperture, both lids together, which is what an eye does; two
+    // lids canted separately would be a pair of jaws.
+    vec3 right0 = cross(up0, gazeW);
+    vec3 up = up0 * cos(lidRoll) + right0 * sin(lidRoll);
+    vec3 right = right0 * cos(lidRoll) - up0 * sin(lidRoll);
+    // The face of the ball, as flat coordinates. Both axes are square to
+    // the gaze, and the camera is orthographic, so these ARE the pixel
+    // offsets across the visible disc: -1 to 1 either way.
+    float x = dot(vDirW, right);
+    float y = dot(vDirW, up);
 
-    // A ragged edge. A clean arc reads as a moulded eyelid; the whole
-    // point of this is that the gel has closed over it, and gel does not
-    // have an edge like that. Drifting, slowly, so the rim creeps.
+    // A ragged edge, but only slightly. A clean arc reads as a moulded
+    // eyelid and the point of this is that gel has closed over the ball,
+    // which does not have an edge like that. At 0.15 though it stopped
+    // reading as a lid at all: the noise is worth a sixth of the ball's
+    // radius, enough to retract one end of the lid past the other and
+    // leave what looked like a bite taken out of the top. Drifting
+    // slowly, so the rim creeps.
     float wob = (vnoise3(vDirW * 4.6 + vec3(gooSeed, gooTime * 0.18, gooSeed))
-                 - 0.5) * 0.15;
+                 - 0.5) * 0.07;
 
-    // Open, the two edges sit out past the poles and take only a sliver
-    // off the top and bottom of the disc — the goo already laps over the
-    // ball's rim as GEOMETRY, and doing that job twice cost more of the
-    // eye than either did alone. Shut, they cross, and the upper travels
-    // half again as far as the lower, as a real lid does.
-    float topEdge = mix(-0.22, 0.92, openness) + wob;
-    float botEdge = mix(-0.12, -0.95, openness) - wob;
-    float over = max(lat - topEdge, botEdge - lat);
-    float cover = smoothstep(-0.03, 0.20, over);
+    // Open is NOT bare. A lid you only ever see on the way down is not a
+    // lid, it is a wipe: the eye has to be sitting in an aperture the
+    // whole time so that closing it is the same shape continuing to move.
+    // These sat out past the poles at first and took a sliver off — the
+    // ball read as a bead that occasionally got swallowed.
+    //
+    // y IS the projected height up the visible disc, so 0.52 takes the
+    // top quarter of it: an upper lid resting over the top of the iris,
+    // which is where a real one sits. The lower takes a little less, and
+    // the upper travels further on the way down, as a real pair does.
+    // Shut, the two OVERLAP, and by more than looks necessary.
+    //
+    // They used to cross by a tenth, which was ample while the edges were
+    // straight. Bowing them toward each other eats that margin from the
+    // middle: two curves that meet at the corners are furthest apart at
+    // the centre, and with the wobble at full throw the overlap there
+    // went negative — leaving a bright open slit across the eye on the
+    // one frame it was supposed to be shut. Worked out rather than
+    // eyeballed, because it is a single frame in a blink and would
+    // never have been caught by looking.
+    float topEdge = mix(-0.40, 0.52, openness) + wob;
+    float botEdge = mix(0.06, -0.58, openness) - wob;
+
+    // The edges CURVE, and they have to.
+    //
+    // Straight ones were the whole of what looked wrong. A lid defined by
+    // "everything past this latitude" is a plane cut through a sphere,
+    // and a plane cut is a half-dome cap — so the eye wore two skullcaps,
+    // top and bottom, with a straight band of aperture between them.
+    //
+    // Tilting the two cuts apart does not fix it either, and that is
+    // worth knowing before trying it: both boundary circles contain the
+    // view direction, so under an orthographic camera each projects to a
+    // straight LINE. Two lines cross once. Tilting them just seals one
+    // side of the eye and opens the other into a wedge.
+    //
+    // What makes an eye an eye is that both edges bow toward each other
+    // and meet at BOTH ends, which is a curve, not a cut. A quadratic is
+    // enough: at this coefficient the two meet just inside the ball's
+    // silhouette with about forty-five degrees between them, so the
+    // aperture is a proper pointed almond and the corners land where the
+    // goo is already lapping over the rim anyway.
+    //
+    // The upper bows harder than the lower. They do on a face too.
+    float overTop = (y + 0.62 * x * x) - topEdge;
+    float overBot = (botEdge + 0.50 * x * x) - y;
+    float over = max(overTop, overBot);
+    // A short ramp. The goo has to fade in rather than step — a hard
+    // alpha edge on a ball this size crawls with aliasing as the lid
+    // moves — but over a fifth of the radius the lid had no line to it at
+    // all and read as a stain.
+    float cover = smoothstep(-0.02, 0.10, over);
 
     // --- the goo over it ------------------------------------------------
     // Beer-Lambert against the eyeball itself, exactly as the gel runs it

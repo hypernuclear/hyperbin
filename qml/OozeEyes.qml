@@ -92,6 +92,10 @@ Node {
             readonly property real size: sphere ? sphere.w : 1
             /// 1 wide open, 0 shut. Rides in the normal's spare slot.
             readonly property real open: normal ? normal.w : 1
+            /// How far this eye's lid axis is canted off the horizontal,
+            /// in radians. Constant per eye — it is anatomy, not motion —
+            /// so it is hashed here rather than sent every frame.
+            readonly property real lidRoll: (eyes.rnd(index, 37) - 0.5) * 0.9
 
             visible: out
             position: sphere ? Qt.vector3d(sphere.x, sphere.y, sphere.z)
@@ -160,6 +164,7 @@ Node {
                                 property real gooTime: eyes.time
                                 property vector3d camUp: eyes.camUp
                                 property vector3d gazeW: eye.gaze
+                                property real lidRoll: eye.lidRoll
                                 // Keeps the ragged rim of one eye's lid
                                 // from being the same rag as its
                                 // neighbour's.

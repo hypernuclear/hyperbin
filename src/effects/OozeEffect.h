@@ -64,7 +64,13 @@ class OozeEffect : public Effect
 
 public:
     /// The most eyes that can ever be out, at a full bin.
-    static constexpr int kMaxEyes = 9;
+    ///
+    /// Every one of these is a slot in the gel's shaders as well — the
+    /// body has to swell around each and draw a meniscus at its rim, and
+    /// a CustomMaterial has no array uniform, so the count is written out
+    /// by hand in three places. Raising it means raising it there too;
+    /// qml/OozeVisual.qml has the list.
+    static constexpr int kMaxEyes = 14;
 
     explicit OozeEffect(QObject *parent = nullptr);
     ~OozeEffect() override;
@@ -136,8 +142,31 @@ private:
         QVector3D nrm;
     };
 
+    /// One eye's placement, before it is turned into a seat.
+    struct EyeSlot
+    {
+        float angle;  ///< radians round the bin; 0 faces the camera
+        float param;  ///< 0..1 up its own surface, body or puddle
+        float radius;
+        bool  pool;
+    };
+
     /// Recompute where the eyes are. Called every step.
     void updateEyes();
+
+    /// Push any two that would touch apart, in place.
+    ///
+    /// The placement sequences spread well but do not GUARANTEE a gap,
+    /// and at fourteen they demonstrably fail to: the golden angle has
+    /// near-returns at Fibonacci indices, so eyes 0 and 13 come back to
+    /// within a fiftieth of a turn of each other. Nothing about the
+    /// sequence can be tuned to fix that in general — the next count
+    /// would just fail at a different pair — so the gap is enforced here
+    /// instead of hoped for.
+    void spreadEyes(EyeSlot *slot, int n) const;
+    /// Where a slot's parameter puts it, in bin-local units. Body and
+    /// puddle share a floor, so this is one line either way.
+    float slotY(const EyeSlot &s) const;
 
     /// On the body's wall.
     /// @param t     0 at the pool's crest, 1 at the gel's surface.
@@ -160,6 +189,17 @@ private:
     OozeShape m_shape;
     QVariantList m_eyeSpheres;
     QVariantList m_eyeNormals;
+    /// The last spread, and what it was spread against.
+    ///
+    /// Where the eyes settle depends only on how many there are and on
+    /// the shape they are settling on — never on the clock. The wobble
+    /// each carries is added afterwards and is far smaller than the gap
+    /// the spread leaves, so it cannot push a pair back together. So the
+    /// relaxation runs when the bin changes and not otherwise, which for
+    /// a bin that is mostly sitting still is almost never.
+    EyeSlot m_spread[kMaxEyes] {};
+    int   m_spreadCount = -1;
+    float m_spreadKey = 0.0f;
     QSizeF  m_binSize {40.0, 40.0};
     QRectF  m_binRect;
     float   m_contentLine = 0.22f;

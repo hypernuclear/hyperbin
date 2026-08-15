@@ -1,6 +1,7 @@
 #include "OozeEffect.h"
 
 #include <QQuick3DTextureData>
+#include <algorithm>
 #include <cmath>
 
 namespace hyperbin {
@@ -186,6 +187,124 @@ OozeEffect::EyeSeat OozeEffect::poolSeat(float u, float angle) const
                      (hi.y() - lo.y()) / (2.0f * kDu), angle);
 }
 
+float OozeEffect::slotY(const EyeSlot &s) const
+{
+    // Both surfaces are measured up from the pool's crest — bodySeat and
+    // poolSeat each start there — so one line answers for either, and the
+    // only difference is how far up they reach.
+    const float crest = m_shape.poolCrest();
+    const float topOf = s.pool ? m_shape.poolTop()
+                               : m_shape.surfaceY(m_contentLine, m_sim.level());
+    return crest + (topOf - crest) * qBound(0.0f, s.param, 1.0f);
+}
+
+void OozeEffect::spreadEyes(EyeSlot *slot, int n) const
+{
+    if (n < 2)
+        return;
+
+    const float binW = float(m_binSize.width());
+    // Not merely "not intersecting". Two balls exactly touching still
+    // read as one lumpy thing at this size, and the goo needs somewhere
+    // to close around each of them — the collar reaches well over an eye's
+    // own radius, so leaving them a hair apart puts two meniscus rings on
+    // top of each other and neither shows.
+    const float margin = binW * 0.045f;
+    const float crest = m_shape.poolCrest();
+
+    // Measured in the surface's OWN units, not in the parameters.
+    //
+    // Angle and height are not comparable: a tenth of a radian is a fifth
+    // of the body's width, and a tenth of the height parameter is a
+    // fifteenth of its height. Pushing in parameter space moves eyes by
+    // wildly different amounts depending on which way they happen to be
+    // crowded, which mostly moved them sideways and never resolved a
+    // vertical pile. Arc length and height are both in bin pixels and can
+    // simply be compared.
+    // What each eye's own numbers are, worked out ONCE per pass and not
+    // once per pair. They only depend on one eye each, and there are n of
+    // them against n^2/2 pairs — computed in the inner loop, the profile
+    // lookups alone cost more than everything else in this effect put
+    // together, and measurably so: it put half again on the whole app's
+    // processor time.
+    const float bodySpan = m_shape.surfaceY(m_contentLine, m_sim.level()) - crest;
+    const float poolSpan = m_shape.poolTop() - crest;
+    float ey[kMaxEyes], ering[kMaxEyes], espan[kMaxEyes];
+
+    for (int pass = 0; pass < 8; ++pass) {
+        for (int i = 0; i < n; ++i) {
+            espan[i] = std::max(slot[i].pool ? poolSpan : bodySpan, 1.0f);
+            ey[i] = crest + espan[i] * qBound(0.0f, slot[i].param, 1.0f);
+            ering[i] = m_shape.radiusAt(ey[i]);
+        }
+        bool moved = false;
+        for (int a = 0; a < n; ++a) {
+            for (int b = a + 1; b < n; ++b) {
+                const float ya = ey[a], yb = ey[b];
+                const float rA = ering[a], rB = ering[b];
+                // Arc length, discounted by how edge-on it is.
+                //
+                // Two eyes out on the flank are properly apart in SPACE
+                // and still look stacked: the surface there is turned
+                // almost side-on, so a step round it barely moves on
+                // screen — about a quarter as far as the same step across
+                // the front. Spreading them by true arc alone left the
+                // silhouette looking like a pile of eyes that measured
+                // clean. Counting arc for less where the body turns away
+                // buys those pairs a wider berth, and the floor keeps it
+                // from running to infinity at the exact edge.
+                const float face = 0.5f * (std::cos(slot[a].angle)
+                                           + std::cos(slot[b].angle));
+                const float ring = 0.5f * (rA + rB)
+                                 * (0.40f + 0.60f * std::abs(face));
+                const float dx = ring * (slot[b].angle - slot[a].angle);
+                const float dy = yb - ya;
+                const float dist = std::sqrt(dx * dx + dy * dy);
+                const float need = slot[a].radius + slot[b].radius + margin;
+                if (dist >= need)
+                    continue;
+
+                // Straight on top of each other, which the sequences can
+                // do exactly: pick an axis rather than dividing by zero.
+                float ux = 1.0f, uy = 0.0f;
+                if (dist > 1e-3f) {
+                    ux = dx / dist;
+                    uy = dy / dist;
+                }
+                const float push = (need - dist) * 0.5f;
+                const float over = push * ux / std::max(ring, 1.0f);
+                slot[a].angle -= over;
+                slot[b].angle += over;
+                slot[a].param -= push * uy / espan[a];
+                slot[b].param += push * uy / espan[b];
+                moved = true;
+            }
+        }
+
+        // Back inside their bounds after every pass, not once at the end.
+        // Clamping only at the end lets a pair settle in a place the
+        // clamp then undoes, putting them back on top of each other with
+        // no pass left to notice.
+        for (int i = 0; i < n; ++i) {
+            // A little past the arc they were dealt, so a crowded front
+            // has somewhere to give — but not so far round that an eye
+            // ends up behind the bin.
+            slot[i].angle = qBound(-2.30f, slot[i].angle, 2.30f);
+            if (slot[i].pool) {
+                slot[i].param = qBound(0.10f, slot[i].param, 0.80f);
+            } else {
+                // The same ceiling the placement applies, recomputed:
+                // spreading moves eyes round the body, and the ceiling
+                // depends on where round it they are.
+                const float back = 0.5f * (1.0f - std::cos(slot[i].angle));
+                slot[i].param = qBound(0.14f, slot[i].param, 0.90f - 0.34f * back);
+            }
+        }
+        if (!moved)
+            break;
+    }
+}
+
 /// The same hash the scene used when it placed these itself, so an eye
 /// keeps the identity it already had: same index, same size, same spot.
 static float eyeHash(float a, float b)
@@ -199,9 +318,38 @@ void OozeEffect::updateEyes()
     m_eyeSpheres.clear();
     m_eyeNormals.clear();
 
-    const int n = qBound(0, int(std::lround(m_sim.level() * kMaxEyes)), kMaxEyes);
+    // How many are out, and it is NOT proportional to the level.
+    //
+    // Straight proportion spread the difference evenly and so made
+    // neither end of the range feel like anything: a quarter-full bin
+    // still had a scatter of them, and a full one was only a few more.
+    // Squaring holds the low end nearly clear — a bin with a little in
+    // it gets one or two, which reads as something starting — and banks
+    // the whole increase into the top, where the point is that it should
+    // look infested.
+    //
+    // fill(), NOT level(). The two are different questions and using the
+    // wrong one here looked exactly like the code not working: level() is
+    // how DEEP the goo is and is floored at seventy per cent the moment
+    // the bin is dirty, so squaring it separated a quarter-full bin from
+    // a full one by a factor of two rather than of sixteen, and all four
+    // test renders came out with much the same crowd.
+    //
+    // With a floor of one, though. Squared alone rounds to nothing below
+    // about a third full, and a bin with goo in it and no eyes at all is
+    // not a quieter version of this effect — it is a different one. The
+    // first eye arrives with the first of the sludge; the rest are what
+    // the fill buys.
+    const float fill = m_sim.fill();
+    const int want = int(std::lround(fill * fill * kMaxEyes));
+    const int n = m_sim.isEmpty() ? 0 : qBound(1, want, kMaxEyes);
     const float t = m_sim.time();
     const float binW = float(m_binSize.width());
+
+    // Placed first, spread second, seated third. The spreading has to see
+    // all of them at once, so it cannot happen inside the loop that makes
+    // them.
+    EyeSlot slot[kMaxEyes] {};
 
     for (int i = 0; i < n; ++i) {
         const float fi = float(i);
@@ -247,9 +395,18 @@ void OozeEffect::updateEyes()
         // out very nearly evenly; the radical inverse in base two does
         // the same for the height and does not track it. Both are chosen
         // for THIS count rather than in the limit.
-        const float ua = std::fmod(fi * 0.3819660113f, 1.0f);
+        // Both sequences are started so that index 0 lands somewhere
+        // WORTH looking at, because the order is not arbitrary: the count
+        // rises with the bin, so the first indices are the only ones a
+        // barely-dirty bin ever shows. Left at their natural starts, eye
+        // zero came out on the back-left flank at the very bottom of the
+        // range — a bin with a little in it grew exactly one eye and it
+        // was behind the goo. The half-turn puts it dead centre front,
+        // and stepping the height sequence on by one puts it at mid
+        // height rather than down in the puddle.
+        const float ua = std::fmod(0.5f + fi * 0.3819660113f, 1.0f);
         float ub = 0.0f;
-        for (int bits = i, place = 1; bits; bits >>= 1, ++place)
+        for (int bits = i + 1, place = 1; bits; bits >>= 1, ++place)
             ub += (bits & 1) ? std::ldexp(1.0f, -place) : 0.0f;
 
         // Squeezed toward the camera, and LINEARLY.
@@ -264,8 +421,11 @@ void OozeEffect::updateEyes()
         // both flanks, the outermost pair just past the silhouette where
         // they read as something further down in the goo rather than as
         // nothing at all.
+        // The base placement carries NO clock. Everything time-varying —
+        // the wobble, how proud it rides, the blink — is added after the
+        // spread, so the spread itself is a pure function of the count
+        // and the shape and can simply be remembered.
         const float bent = (2.0f * ua - 1.0f) * 3.14159265f * 0.62f;
-        const float angle = bent + 0.020f * std::sin(t * 0.21f + fi * 1.7f);
 
         // The low third of them go in the PUDDLE, not on the wall.
         //
@@ -296,12 +456,45 @@ void OozeEffect::updateEyes()
         // the gel.
         const float back = 0.5f * (1.0f - std::cos(bent));
         const float top = 0.90f - 0.34f * back;
-        const float height = 0.16f + (top - 0.16f) * (0.94f * ub + 0.06f * seedB)
-                           + 0.008f * std::sin(t * 0.27f + fi * 2.3f);
+        const float height = 0.16f + (top - 0.16f) * (0.94f * ub + 0.06f * seedB);
 
-        const EyeSeat seat = inPool
-            ? poolSeat(0.14f + 0.62f * (ub / kPoolShare), angle)
-            : bodySeat(height, angle);
+        slot[i].angle = bent;
+        slot[i].param = inPool ? 0.14f + 0.62f * (ub / kPoolShare) : height;
+        slot[i].radius = radius;
+        slot[i].pool = inPool;
+    }
+
+    // Nothing above guarantees they do not touch, so this does — and it
+    // is the same answer every frame until the bin itself moves, so it is
+    // worked out then and kept.
+    const float key = m_shape.surfaceY(m_contentLine, m_sim.level())
+                    + 7.0f * m_shape.poolTop() + 13.0f * binW;
+    if (n != m_spreadCount || !qFuzzyCompare(key, m_spreadKey)) {
+        spreadEyes(slot, n);
+        std::copy(slot, slot + n, m_spread);
+        m_spreadCount = n;
+        m_spreadKey = key;
+    } else {
+        std::copy(m_spread, m_spread + n, slot);
+    }
+
+    for (int i = 0; i < n; ++i) {
+        const float fi = float(i);
+        const float seedA = eyeHash(fi, 1.0f);
+        const float seedB = eyeHash(fi, 2.0f);
+        const float seedC = eyeHash(fi, 3.0f);
+        const float radius = slot[i].radius;
+
+        // The wobble goes on HERE, after the spread. About a degree of
+        // turn and a hair of rise — an order of magnitude under the gap
+        // the spread leaves, so it can shift an eye without ever walking
+        // one back into its neighbour.
+        const float angle = slot[i].angle + 0.020f * std::sin(t * 0.21f + fi * 1.7f);
+        const float param = slot[i].param
+                          + (slot[i].pool ? 0.0f
+                                          : 0.008f * std::sin(t * 0.27f + fi * 2.3f));
+        const EyeSeat seat = slot[i].pool ? poolSeat(param, angle)
+                                          : bodySeat(param, angle);
 
         // The whole of the motion, and it runs along the normal: an eye
         // rises out of the gel and settles back into it.

@@ -97,6 +97,11 @@ void MAIN()
     collar = max(collar, eyeCollar(vPosO, n, eye6, slope));
     collar = max(collar, eyeCollar(vPosO, n, eye7, slope));
     collar = max(collar, eyeCollar(vPosO, n, eye8, slope));
+    collar = max(collar, eyeCollar(vPosO, n, eye9, slope));
+    collar = max(collar, eyeCollar(vPosO, n, eye10, slope));
+    collar = max(collar, eyeCollar(vPosO, n, eye11, slope));
+    collar = max(collar, eyeCollar(vPosO, n, eye12, slope));
+    collar = max(collar, eyeCollar(vPosO, n, eye13, slope));
     // Overstated, and deliberately — the same constant fudge the vertex
     // shader applies to the lumps and for the same reason. The body is
     // smooth and the environment is a soft studio probe, so a

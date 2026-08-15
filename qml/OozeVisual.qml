@@ -170,10 +170,11 @@ Item {
 
         // The eyes, one uniform each.
         //
-        // Nine of them written out rather than a loop, because a
-        // CustomMaterial has no array uniform and GLSL cannot index a
-        // uniform that is not an array. A slot nobody is using has a
-        // radius of zero, which the shader reads as "not there".
+        // Written out rather than looped, because a CustomMaterial has no
+        // array uniform and GLSL cannot index a uniform that is not an
+        // array. A slot nobody is using has a radius of zero, which the
+        // shaders read as "not there" — so the list is as long as
+        // OozeEffect::kMaxEyes and usually only part full.
         property vector4d eye0: root.eyeSphere(0)
         property vector4d eye1: root.eyeSphere(1)
         property vector4d eye2: root.eyeSphere(2)
@@ -183,6 +184,11 @@ Item {
         property vector4d eye6: root.eyeSphere(6)
         property vector4d eye7: root.eyeSphere(7)
         property vector4d eye8: root.eyeSphere(8)
+        property vector4d eye9: root.eyeSphere(9)
+        property vector4d eye10: root.eyeSphere(10)
+        property vector4d eye11: root.eyeSphere(11)
+        property vector4d eye12: root.eyeSphere(12)
+        property vector4d eye13: root.eyeSphere(13)
 
         vertexShader: "qrc:/shaders3d/ooze3d.vert"
         fragmentShader: "qrc:/shaders3d/ooze3d.frag"

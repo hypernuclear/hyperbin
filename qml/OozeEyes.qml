@@ -42,12 +42,15 @@ Node {
     /// would face straight out of the body and the ones on the sides
     /// would be looking away entirely.
     ///
-    /// A third is the useful amount. It costs the eyes on the front
-    /// almost nothing — the normal there is already the camera — and
-    /// turns one on the flank by about thirty degrees, which is enough to
-    /// read as set into the surface and not so much that it stops
-    /// watching you.
-    property real gazeBias: 0.35
+    /// It costs the eyes on the front almost nothing whatever it is set
+    /// to — the normal there is already very nearly the camera — so this
+    /// is really a setting for the flanks alone. At a third, one out on
+    /// the side turned by only about thirty degrees, which still read as
+    /// an eye pasted on the silhouette staring past its own socket. Over
+    /// half turns it about fifty, which is a ball sitting in the goo and
+    /// looking out of it, and it keeps watching you everywhere it can
+    /// plausibly be said to be facing you at all.
+    property real gazeBias: 0.55
 
     readonly property var spheres: effect ? effect.eyeSpheres : []
     readonly property var normals: effect ? effect.eyeNormals : []

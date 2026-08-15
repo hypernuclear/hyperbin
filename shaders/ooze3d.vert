@@ -158,6 +158,11 @@ float eyesAt(vec3 q)
     s = max(s, eyeBulge(q, eye6));
     s = max(s, eyeBulge(q, eye7));
     s = max(s, eyeBulge(q, eye8));
+    s = max(s, eyeBulge(q, eye9));
+    s = max(s, eyeBulge(q, eye10));
+    s = max(s, eyeBulge(q, eye11));
+    s = max(s, eyeBulge(q, eye12));
+    s = max(s, eyeBulge(q, eye13));
     return s;
 }
 // Where the puddle has gathered.

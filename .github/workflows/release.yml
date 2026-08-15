@@ -26,6 +26,14 @@ env:
 
 jobs:
   build:
+    # Skip `release/v*` pull requests. They carry no application code —
+    # a version bump and a CHANGELOG entry — so building them tests
+    # nothing that the feature PRs did not already test, and the tag
+    # build immediately afterwards is the real release build. Skipping
+    # here is what keeps it to one full build per release instead of two.
+    if: |
+      github.event_name != 'pull_request' ||
+      !startsWith(github.head_ref, 'release/v')
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -83,7 +91,23 @@ jobs:
         with:
           version: ${{ env.QT_VERSION }}
           arch: ${{ matrix.qt-arch }}
-          modules: qtshadertools qtquick3d qtsvg
+          # qtquick3d for the ooze effect's View3D; qtshadertools because
+          # Quick3D needs it and qt_add_shaders bakes the fly mask.
+          #
+          # NOT qtsvg. It is part of the base install in Qt 6, not a
+          # separate module, and naming it here fails outright with
+          # "The packages ['qtsvg'] were not found while parsing XML" —
+          # which reads like the package is missing rather than already
+          # present. The tray icon and the marks still get QtSvg.
+          modules: qtshadertools qtquick3d
+          # Qt 6.11+ on Windows uses a flattened per-arch repo layout that
+          # aqtinstall 3.3.0 — the action's default, and the newest on
+          # PyPI — cannot parse; it fails with "Failed to locate XML data
+          # for Qt version". Fixed on aqt master but not yet released, so
+          # install from a pinned SHA. See aqtinstall#959 and PR#1000.
+          # Drop this once aqt v3.4+ ships. Kept identical to hypershot's
+          # pin so both products move together.
+          aqtsource: "git+https://github.com/miurahr/aqtinstall.git@75ea7944aeac985e226df0a882cd5b3470e51a97"
           cache: true
 
       - name: Install Ninja

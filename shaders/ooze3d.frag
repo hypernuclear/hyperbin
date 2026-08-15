@@ -1,5 +1,6 @@
 VARYING vec2 vScreen;
 VARYING vec3 vNormalW;
+VARYING vec3 vPosO;
 VARYING float vThick;
 VARYING float vHeight;
 VARYING float vLump;
@@ -21,6 +22,47 @@ vec3 toLinear(vec3 c)
     return pow(max(c, vec3(0.0)), vec3(2.2));
 }
 
+// The meniscus where the gel meets an eye.
+//
+// This is the same division of labour the lumps use in the vertex shader,
+// for the same reason. There, the coarse band moves vertices and the fine
+// band only tilts the normal, because detail below the vertex spacing
+// cannot be in the geometry at all. Here the eye is the thing below the
+// spacing: the body is 64 segments round, and at the size these are, one
+// segment is as wide as a whole eye. The broad swell fits in the mesh and
+// is done there; the crease around the rim of the ball does not fit in
+// the mesh at any amplitude, and pushing harder on the vertices only ever
+// made the swell wider.
+//
+// A RING, and that is the whole point of it. Something pressed into a
+// thick liquid is not surrounded by a mound — the liquid is held down by
+// the ball itself and piles up at its edge, so the peak belongs just
+// outside the silhouette. A shape that peaked at the centre would have to
+// be tall enough to show at the rim, and anything that tall closed over
+// the pupil.
+//
+// Returns the ring's height, 0..1, and accumulates the slope along the
+// surface so the light has something to catch.
+float eyeCollar(vec3 p, vec3 nrm, vec4 e, inout vec3 slope)
+{
+    if (e.w <= 0.0)
+        return 0.0;
+    vec3 rel = p - e.xyz;
+    float u = length(rel) / e.w;
+    float k = (u - 1.20) / 1.15;   // peak just outside the ball, gone by 2.35
+    float w = 1.0 - k * k;
+    if (w <= 0.0)
+        return 0.0;
+    // Away from the eye, along the surface. Near the ball's silhouette
+    // this is very nearly the view direction, so it has to be projected
+    // back onto the tangent plane or the tilt goes into the surface.
+    vec3 t = rel - nrm * dot(rel, nrm);
+    float tl = length(t);
+    if (tl > 1e-5)
+        slope += (t / tl) * (-2.0 * k / 1.15);
+    return w;
+}
+
 void MAIN()
 {
     // Where we are on the bin, 0..1.
@@ -38,13 +80,42 @@ void MAIN()
     // outline was what made the gel take the bin's form, slots and all,
     // instead of being a body the bin sits inside.
     vec3 n = normalize(vNormalW);
+
+    // Deepest wins rather than stacking, as everywhere else here: two
+    // eyes close together would otherwise raise a rim twice the size of
+    // anything either could make alone. No check for whether the eye is
+    // on the far side of the body — the ring dies out at a couple of eye
+    // radii and the far side is most of a bin away, so the distance has
+    // already answered it.
+    vec3 slope = vec3(0.0);
+    float collar = eyeCollar(vPosO, n, eye0, slope);
+    collar = max(collar, eyeCollar(vPosO, n, eye1, slope));
+    collar = max(collar, eyeCollar(vPosO, n, eye2, slope));
+    collar = max(collar, eyeCollar(vPosO, n, eye3, slope));
+    collar = max(collar, eyeCollar(vPosO, n, eye4, slope));
+    collar = max(collar, eyeCollar(vPosO, n, eye5, slope));
+    collar = max(collar, eyeCollar(vPosO, n, eye6, slope));
+    collar = max(collar, eyeCollar(vPosO, n, eye7, slope));
+    collar = max(collar, eyeCollar(vPosO, n, eye8, slope));
+    // Overstated, and deliberately — the same constant fudge the vertex
+    // shader applies to the lumps and for the same reason. The body is
+    // smooth and the environment is a soft studio probe, so a
+    // geometrically honest tilt moves this shading by almost nothing. An
+    // honest 0.55 went in first and the ring was, measured against a flat
+    // red debug fill, landing exactly where it should and shading like it
+    // was not there at all.
+    n = normalize(n - slope * 1.70);
+
     // The lumps thicken and thin the body as well as bending its surface.
     // Shape alone was nearly invisible: a smooth gel under a soft studio
     // probe shades almost identically whichever way its normal points, so
     // the animation was running and could not be seen. Varying how much
     // gel the light has to cross is what makes it read as something
     // alive, because it changes the COLOUR and not just the highlight.
-    float thick = clamp(vThick * (1.0 + vLump * 0.55), 0.0, 1.0);
+    // The collar is gel piled up, so there is more of it to see through
+    // here — which is what turns the ring from a highlight into something
+    // with depth, for the same reason the lumps feed this at all.
+    float thick = clamp(vThick * (1.0 + vLump * 0.55) + collar * 0.55, 0.0, 1.0);
 
     // --- refraction ---------------------------------------------------
     // Two parts, and the second is what makes it read as something
@@ -179,8 +250,15 @@ void MAIN()
     // Low roughness with a clearcoat is what makes it wet rather than
     // rubbery; the environment does the rest.
     // Not a mirror: at 0.07 with a clearcoat this read as chromed metal.
-    ROUGHNESS = 0.24;
     METALNESS = 0.0;
     FRESNEL_POWER = 2.5;
-    SPECULAR_AMOUNT = 0.40 * (1.0 - lidHole);
+    // Wettest at the meniscus. The crest of the collar is the thinnest,
+    // most sharply curved gel anywhere on the body, and on a real one
+    // that is where the light runs in a line. It is also the cue that
+    // does the most work here: the ring's SHAPE is nearly invisible under
+    // a probe this soft, but a bright edge at the ball's rim reads
+    // immediately as the two things touching.
+    float wet = smoothstep(0.45, 1.0, collar);
+    ROUGHNESS = 0.24 - 0.09 * wet;
+    SPECULAR_AMOUNT = (0.40 + 0.50 * wet) * (1.0 - lidHole);
 }

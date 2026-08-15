@@ -375,6 +375,8 @@ qt_add_resources(hyperbin "hyperbin_shaders3d"
     FILES
         shaders/ooze3d.vert
         shaders/ooze3d.frag
+        shaders/eye3d.vert
+        shaders/eye3d.frag
 )
 
 # Headless swarm check. No GUI, so it runs on CI and under the debugger

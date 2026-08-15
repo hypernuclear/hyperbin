@@ -12,8 +12,10 @@
 
 #include <QImage>
 #include <QSizeF>
+#include <QVariantList>
 #include <QVector>
 #include <QVector3D>
+#include <QVector4D>
 
 namespace hyperbin {
 
@@ -39,8 +41,31 @@ class OozeEffect : public Effect
     Q_PROPERTY(float rimY READ rimY NOTIFY shapeChanged)
     Q_PROPERTY(float rimRadius READ rimRadius NOTIFY shapeChanged)
     Q_PROPERTY(QObject *iconTexture READ iconTexture NOTIFY shapeChanged)
+    /// The eyes, one entry each, only as many as are currently out.
+    ///
+    /// (x, y, z, radius) in bin-local units. Two consumers want this and
+    /// they want it in different places — qml/OozeEyes.qml puts a model
+    /// there, and the gel's vertex shader tents its surface up over it —
+    /// so it is computed once, here, against the same profile the mesh is
+    /// swept from. Working it out in QML was the earlier arrangement and
+    /// it could not answer the second question at all: the scene knows
+    /// where it PUT an eye, but not which way the gel faces there.
+    Q_PROPERTY(QVariantList eyeSpheres READ eyeSpheres NOTIFY frameChanged)
+    /// (x, y, z, open) — the gel's outward normal where each eye sits,
+    /// and how open that eye is, 0 shut to 1 wide. The scene leans a gaze
+    /// by the first and hands the second to the eyeball's own material,
+    /// which is where the lids are drawn.
+    Q_PROPERTY(QVariantList eyeNormals READ eyeNormals NOTIFY frameChanged)
+    /// How many there can ever be. The scene builds this many delegates
+    /// once and hides the ones that are not out; rebuilding the Repeater3D
+    /// whenever the count moved cost four times the whole effect when the
+    /// bubbles did it.
+    Q_PROPERTY(int maxEyes READ maxEyes CONSTANT)
 
 public:
+    /// The most eyes that can ever be out, at a full bin.
+    static constexpr int kMaxEyes = 9;
+
     explicit OozeEffect(QObject *parent = nullptr);
     ~OozeEffect() override;
 
@@ -81,24 +106,9 @@ public:
     float rimRadius() const { return m_shape.rimRadius(); }
     QObject *iconTexture() const;
 
-    /// Where to put an eye, in bin-local units.
-    ///
-    /// The scene cannot work this out for itself: the body's half-width
-    /// at a given height comes from the measured silhouette, and that
-    /// lives here. Reusing it means an eye is placed against the same
-    /// profile the mesh is swept from, so the two cannot drift apart —
-    /// the same reason OozeGeometry asks rather than measuring again.
-    ///
-    /// @param t     0 at the pool, 1 at the gel's surface.
-    /// @param angle radians around the bin's axis; 0 faces the camera.
-    /// @param sink  fraction of the body's half-width to sit at. Below 1
-    ///              the eye is buried, at 1 its centre is on the surface
-    ///              and half of it stands proud. The vertex shader then
-    ///              displaces the surface over it, so the same value
-    ///              submerges an eye where the gel bulges and exposes it
-    ///              where the gel thins — which is the variation that
-    ///              makes them look suspended rather than stuck on.
-    Q_INVOKABLE QVector3D eyeAt(float t, float angle, float sink) const;
+    QVariantList eyeSpheres() const { return m_eyeSpheres; }
+    QVariantList eyeNormals() const { return m_eyeNormals; }
+    int maxEyes() const { return kMaxEyes; }
 
     const OozeSim &sim() const { return m_sim; }
     /// The gel's silhouette, measured from the bin's artwork. Read by
@@ -113,8 +123,43 @@ signals:
     void shapeChanged();
 
 private:
+    /// A place on the gel to sit an eye: a point, and which way the gel
+    /// faces there.
+    ///
+    /// The two always travel together. Working the normal out separately
+    /// meant two functions walking the same profile and either could be
+    /// changed without the other, which is the drift this whole file is
+    /// arranged to prevent.
+    struct EyeSeat
+    {
+        QVector3D pos;
+        QVector3D nrm;
+    };
+
+    /// Recompute where the eyes are. Called every step.
+    void updateEyes();
+
+    /// On the body's wall.
+    /// @param t     0 at the pool's crest, 1 at the gel's surface.
+    /// @param angle radians around the bin's axis; 0 faces the camera.
+    EyeSeat bodySeat(float t, float angle) const;
+    /// On the puddle's upper surface, which is a different shape and a
+    /// nearly horizontal one — so an eye there is looking up out of a
+    /// flat spill rather than out of a wall, and its normal has to come
+    /// from the shoulder the mesh actually sweeps.
+    /// @param u     0 at the puddle's outer rim, 1 where it meets the body.
+    EyeSeat poolSeat(float u, float angle) const;
+
+    /// Both seats are the same surface of revolution seen twice: a ring
+    /// radius and a height that each move with one parameter. Given how
+    /// fast they move, the normal is the same three lines either way.
+    static EyeSeat sweepSeat(float r, float y, float drdp, float dydp,
+                             float angle);
+
     OozeSim m_sim;
     OozeShape m_shape;
+    QVariantList m_eyeSpheres;
+    QVariantList m_eyeNormals;
     QSizeF  m_binSize {40.0, 40.0};
     QRectF  m_binRect;
     float   m_contentLine = 0.22f;

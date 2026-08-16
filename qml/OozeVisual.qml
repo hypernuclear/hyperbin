@@ -28,6 +28,14 @@ Item {
     readonly property real binW: effect ? effect.binSize.width : 40
     readonly property real binH: effect ? effect.binSize.height : 40
 
+    // Where the eyes are, so the gel can climb them. (x, y, z, radius),
+    // and only the ones currently out are in the list — see
+    // OozeEffect::eyeSpheres.
+    readonly property var eyeList: effect ? effect.eyeSpheres : []
+    function eyeSphere(i) {
+        return i < eyeList.length ? eyeList[i] : Qt.vector4d(0, 0, 0, 0)
+    }
+
     View3D {
         anchors.fill: parent
         camera: cam
@@ -88,6 +96,19 @@ Item {
                              - root.width / 2 : 0
             y: root.effect ? -(root.effect.binRect.y + root.effect.binRect.height / 2
                                - root.height / 2) : 0
+        // The eyes go in BEFORE the gel in the scene graph so the gel's
+        // transparent pass composites over them — an eye drawn after it
+        // sits on top of the body instead of inside it.
+        OozeEyes {
+            effect: root.effect
+            camTilt: cam.tilt
+            // The lids are the same substance as the body, so they read
+            // the body's numbers rather than carrying their own.
+            gooTint: sludgeMaterial.tint
+            gooAbsorption: sludgeMaterial.absorption
+            gooScatter: sludgeMaterial.scatter
+        }
+
         Model {
             id: sludge
             geometry: OozeGeometry {
@@ -146,6 +167,28 @@ Item {
         property real refractAmount: root.binW * 0.09
         property real dispersion: 0.35
         property color tint: "#6fbf3a"
+
+        // The eyes, one uniform each.
+        //
+        // Written out rather than looped, because a CustomMaterial has no
+        // array uniform and GLSL cannot index a uniform that is not an
+        // array. A slot nobody is using has a radius of zero, which the
+        // shaders read as "not there" — so the list is as long as
+        // OozeEffect::kMaxEyes and usually only part full.
+        property vector4d eye0: root.eyeSphere(0)
+        property vector4d eye1: root.eyeSphere(1)
+        property vector4d eye2: root.eyeSphere(2)
+        property vector4d eye3: root.eyeSphere(3)
+        property vector4d eye4: root.eyeSphere(4)
+        property vector4d eye5: root.eyeSphere(5)
+        property vector4d eye6: root.eyeSphere(6)
+        property vector4d eye7: root.eyeSphere(7)
+        property vector4d eye8: root.eyeSphere(8)
+        property vector4d eye9: root.eyeSphere(9)
+        property vector4d eye10: root.eyeSphere(10)
+        property vector4d eye11: root.eyeSphere(11)
+        property vector4d eye12: root.eyeSphere(12)
+        property vector4d eye13: root.eyeSphere(13)
 
         vertexShader: "qrc:/shaders3d/ooze3d.vert"
         fragmentShader: "qrc:/shaders3d/ooze3d.frag"

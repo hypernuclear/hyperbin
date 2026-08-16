@@ -32,6 +32,31 @@ public:
     /// How far down the bin the coating has crept, 0..1. Eased, so a bin
     /// emptied in one go does not snap clean.
     float level() const { return m_level; }
+
+    /// How full the bin READS, 0 to 1, over the level's own easing.
+    ///
+    /// Not the same question as level(), and the difference has caught
+    /// something already. level() is how deep the gel is, and it is
+    /// floored at minShare the instant the bin is dirty at all — so it
+    /// only ever moves across the top third of its range, because a
+    /// shallower smear than that cannot be seen through a translucent
+    /// bin. Anything that wants to scale with how full the bin is, rather
+    /// than with how deep the goo is, has to have that floor taken back
+    /// off; used raw, level() makes a quarter-full bin look nearly the
+    /// same as a full one.
+    ///
+    /// Taken off the eased level rather than from fullness() directly, so
+    /// whatever reads this arrives with the goo rather than snapping the
+    /// moment the bin changes.
+    float fill() const
+    {
+        const float lo = params.maxLevel * params.minShare;
+        const float span = params.maxLevel - lo;
+        if (span <= 0.0f)
+            return m_level > 0.0f ? 1.0f : 0.0f;
+        const float f = (m_level - lo) / span;
+        return f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f);
+    }
     /// Seconds since the coating first appeared. Drives the drip cycles.
     float time() const { return m_time; }
 

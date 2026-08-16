@@ -273,8 +273,11 @@ void OozeGeometry::rebuild()
         push(innerR * std::cos(a), bodyTop + innerR * 0.13f * std::sin(a));
     }
     // --- the sweep ---------------------------------------------------------
-    constexpr int kU = 64;          // around, all the way round
-    constexpr float kDepth = 0.86f; // the bin is a little deeper than wide
+    constexpr int kU = 64; // around, all the way round
+    // The bin is a little deeper than wide. Shared with OozeShape so that
+    // whatever else gets placed on this surface is squashed by the same
+    // amount the surface is.
+    constexpr float kDepth = OozeShape::kDepth;
 
     const int nr = outline.size();
     // A true solid of revolution, and it has to stay one.

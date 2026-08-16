@@ -19,6 +19,16 @@ namespace hyperbin {
 class OozeShape
 {
 public:
+    /// How much the body is flattened front to back when it is swept.
+    ///
+    /// The bin is a little deeper than it is wide, so the sweep squashes
+    /// z. It lives here rather than in OozeGeometry because anything that
+    /// puts something ON the surface has to apply it too: eyeAt() did not,
+    /// and an eye facing the camera came out a seventh of the body's
+    /// radius clear of the gel it was supposed to be sitting in — which
+    /// only showed at the front and back, where cos(angle) is largest.
+    static constexpr float kDepth = 0.86f;
+
     /// Measure the bin's taper from its silhouette. Safe to call with an
     /// empty grid: falls back to a generic tapered barrel so the effect
     /// still draws something before the first artwork arrives.

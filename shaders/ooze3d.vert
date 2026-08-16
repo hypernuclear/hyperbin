@@ -8,6 +8,11 @@
 // wants is where the pixel actually LANDS, in the bin's own pixels.
 VARYING vec2 vScreen;
 VARYING vec3 vNormalW;
+// Where this pixel is on the body, in the bin's own units and in the same
+// space the eyes are given in — so the fragment shader can measure its
+// distance to one. Object space rather than world: the scene translates
+// the whole thing onto the bin, and the eyes are not translated with it.
+VARYING vec3 vPosO;
 VARYING float vThick;
 VARYING float vHeight;
 VARYING float vLump;
@@ -109,6 +114,57 @@ float blisterAt(vec3 q)
     }
     return s;
 }
+// The gel climbing an eye.
+//
+// Something set into a thick liquid does not leave the surface flat
+// around it: the liquid rides up its sides and holds it. Without this the
+// eyes were beads resting ON the body, which is the same failure the
+// ridges were added to fix one level up — a shape carrying no evidence of
+// anything ever having touched it.
+//
+// A quadratic dome rather than another noise octave, for the same reason
+// the blisters are one: what is wanted is a few distinct ROUND things in
+// places that are known, and noise of any spectrum gives an even scatter
+// of bumps instead.
+//
+// It peaks at the eye's own centre, which is the one part of it nobody
+// ever sees — the eyeball is drawn there, in front, and hides it. What
+// reads is the ring around the outside. That is also why the reach is
+// well over the eye's own radius: a dome that stopped at the ball would
+// be entirely behind it.
+float eyeBulge(vec3 q, vec4 e)
+{
+    // e.xyz is the centre, e.w the radius. Zero means the slot is empty.
+    if (e.w <= 0.0)
+        return 0.0;
+    float d = length(q - e.xyz) / (e.w * 2.4);
+    // Scaled by the EYE, not by the bin. A rise measured against the bin
+    // is the same for all of them, and the eyes vary in size by nearly
+    // two to one — so one number either drowned the small ones or barely
+    // touched the large ones, and there was no value in between.
+    return max(0.0, 1.0 - d * d) * e.w * 0.85;
+}
+float eyesAt(vec3 q)
+{
+    // Deepest wins rather than stacking, as with the blisters: two eyes
+    // that happened to sit close would otherwise raise one lump twice the
+    // size of anything either could make alone.
+    float s = eyeBulge(q, eye0);
+    s = max(s, eyeBulge(q, eye1));
+    s = max(s, eyeBulge(q, eye2));
+    s = max(s, eyeBulge(q, eye3));
+    s = max(s, eyeBulge(q, eye4));
+    s = max(s, eyeBulge(q, eye5));
+    s = max(s, eyeBulge(q, eye6));
+    s = max(s, eyeBulge(q, eye7));
+    s = max(s, eyeBulge(q, eye8));
+    s = max(s, eyeBulge(q, eye9));
+    s = max(s, eyeBulge(q, eye10));
+    s = max(s, eyeBulge(q, eye11));
+    s = max(s, eyeBulge(q, eye12));
+    s = max(s, eyeBulge(q, eye13));
+    return s;
+}
 // Where the puddle has gathered.
 //
 // A ring of even thickness is the one thing a spill never is: it runs to
@@ -139,7 +195,10 @@ float shadeAt(vec3 q, float lumpScale, float poolW, out float coarse,
          + fine * binWidth * 0.030
          + waveAt(q) * binWidth * 0.015 * (1.0 - poolW)
          + gatherAt(q) * binWidth * 0.042 * poolW
-         + blisterAt(q) * binWidth * 0.055 * poolW;
+         + blisterAt(q) * binWidth * 0.055 * poolW
+         // Not windowed by the pool: the eyes are up on the body, which
+         // is where poolW has already gone to zero.
+         + eyesAt(q);
 }
 void MAIN()
 {
@@ -185,7 +244,8 @@ void MAIN()
     float d0 = lumpRaw * binWidth * 0.030 * lumpScale
              + waveAt(VERTEX) * binWidth * 0.015 * (1.0 - poolW)
              + gatherAt(VERTEX) * binWidth * 0.042 * poolW
-             + blisterAt(VERTEX) * binWidth * 0.055 * poolW;
+             + blisterAt(VERTEX) * binWidth * 0.055 * poolW
+             + eyesAt(VERTEX);
 
     // ...and a breath. One slow cycle over about ten seconds, swelling
     // the whole body a hair — a thing that is perfectly still reads as a
@@ -250,5 +310,6 @@ void MAIN()
     vScreen = (mv * vec4(pos, 1.0)).xy - (mv * vec4(0.0, 0.0, 0.0, 1.0)).xy;
 
     vNormalW = normalize(NORMAL_MATRIX * n);
+    vPosO = pos;
     POSITION = MODELVIEWPROJECTION_MATRIX * vec4(pos, 1.0);
 }

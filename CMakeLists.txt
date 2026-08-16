@@ -304,6 +304,7 @@ qt_add_qml_module(hyperbin
         qml/Main.qml
         qml/BinGlyph.qml
         qml/OozeVisual.qml
+        qml/OozeEyes.qml
         qml/Permissions.qml
         qml/Splash.qml
         qml/HyperbinLockup.qml
@@ -359,6 +360,14 @@ qt_add_resources(hyperbin "hyperbin_icons"
         # that silently falls back to the system UI face on every machine
         # but the one it was designed on is not a brand.
         resources/Inter-SemiBold.ttf
+        # The eyeballs in the goo. Converted from a glTF with balsam;
+        # see docs/effects.md. The source model's cornea is a second,
+        # transparent mesh — left out on purpose, because a transparent
+        # PBR shell costs a full extra pass to produce a highlight that
+        # is sub-pixel at the size this is drawn.
+        resources/meshes/eye.mesh
+        resources/maps/eye_albedo.jpg
+        resources/maps/eye_normal.png
 )
 qt_add_resources(hyperbin "hyperbin_shaders3d"
     PREFIX "/shaders3d"
@@ -366,6 +375,8 @@ qt_add_resources(hyperbin "hyperbin_shaders3d"
     FILES
         shaders/ooze3d.vert
         shaders/ooze3d.frag
+        shaders/eye3d.vert
+        shaders/eye3d.frag
 )
 
 # Headless swarm check. No GUI, so it runs on CI and under the debugger

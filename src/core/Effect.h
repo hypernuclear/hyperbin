@@ -18,6 +18,8 @@
 // it sixty times a second costs exactly as much as real animation.
 #pragma once
 
+#include "BinMouth.h"
+
 #include <QMargins>
 #include <QtGlobal>
 #include <QObject>
@@ -64,6 +66,20 @@ public:
     /// how, and why it works on both platforms. Effects that do not care
     /// where the rubbish sits can ignore it.
     virtual void setContentLine(float y01) { Q_UNUSED(y01); }
+
+    /// Where the bin's OPENING is — the ellipse you could reach into.
+    ///
+    /// Everything else here describes the bin's outline. This describes
+    /// the hole in the top of it, which the outline cannot: the near lip
+    /// runs THROUGH the silhouette, not around it. An effect that has
+    /// something come out of the bin needs it, both to know where the way
+    /// out is and to know what should pass behind the front wall on the
+    /// way; an effect that only crawls over the outside can ignore it.
+    ///
+    /// Measured from the artwork, not assumed — see core/BinMouth. Check
+    /// `measured` before leaning on it hard; it falls back to a generic
+    /// bin rather than refusing to answer.
+    virtual void setMouth(const BinMouth &mouth) { Q_UNUSED(mouth); }
     /// The bin's artwork itself, in colour.
     ///
     /// Node-based effects get this as a texture in updateNode() and can

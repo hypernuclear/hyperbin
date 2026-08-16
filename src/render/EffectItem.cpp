@@ -1,5 +1,7 @@
 #include "EffectItem.h"
 
+#include "BinMouth.h"
+
 #include "../core/EffectRegistry.h"
 
 #include <QCursor>
@@ -213,6 +215,14 @@ void EffectItem::rebuildSurface()
     }
     m_effect->setSurface(cov, kCoverage, kCoverage);
     m_effect->setContentLine(detectContentLine());
+    // The opening, measured off the FULL-resolution artwork rather than
+    // the coverage grid: the lip is a shading edge a few pixels thick,
+    // and the grid is 1-bit alpha at a fraction of the size. It would not
+    // survive either conversion.
+    const BinMouth mouth = measureBinMouth(m_binIcon);
+    m_effect->setMouth(mouth);
+    m_mouth = mouth;
+    emit mouthChanged();
 }
 
 float EffectItem::detectContentLine() const

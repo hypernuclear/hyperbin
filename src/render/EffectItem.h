@@ -38,6 +38,14 @@ class EffectItem : public QQuickItem
                    NOTIFY frameIntervalMsChanged)
     Q_PROPERTY(QRectF binRect READ binRect WRITE setBinRect NOTIFY binRectChanged)
     Q_PROPERTY(QString effectId READ effectId WRITE setEffectId NOTIFY effectIdChanged)
+    /// The bin's opening, in the bin rect's own 0..1 coordinates. Exposed
+    /// here rather than on one effect because it describes the BIN, not
+    /// any animation of it — and because dev mode draws it to check the
+    /// measurement against the artwork it came from.
+    Q_PROPERTY(QPointF mouthCentre READ mouthCentre NOTIFY mouthChanged)
+    Q_PROPERTY(qreal mouthHalfWidth READ mouthHalfWidth NOTIFY mouthChanged)
+    Q_PROPERTY(qreal mouthDepth READ mouthDepth NOTIFY mouthChanged)
+    Q_PROPERTY(bool mouthMeasured READ mouthMeasured NOTIFY mouthChanged)
 
 public:
     explicit EffectItem(QQuickItem *parent = nullptr);
@@ -74,7 +82,12 @@ public:
     /// The pointer is on the bin and the effect has finished reacting.
     bool isDismissed() const { return m_dismissed; }
 
+    QPointF mouthCentre() const { return m_mouth.centre; }
+    qreal mouthHalfWidth() const { return qreal(m_mouth.halfWidth); }
+    qreal mouthDepth() const { return qreal(m_mouth.depth); }
+    bool mouthMeasured() const { return m_mouth.measured; }
 signals:
+    void mouthChanged();
     void fullnessChanged();
     void frameIntervalMsChanged();
     void binRectChanged();
@@ -123,6 +136,7 @@ private:
     QImage        m_binIcon;
     qreal         m_fullness     = 0.0;
     bool          m_binIconDirty = false;
+    BinMouth      m_mouth;
     QSGTexture   *m_maskTexture  = nullptr; // bin silhouette, owned here
     /// Which effect built the current scene-graph node. Effects each
     /// build their own node shape and cast `old` to it, so handing one

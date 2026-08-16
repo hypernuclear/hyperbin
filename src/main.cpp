@@ -68,6 +68,21 @@ private:
 };
 } // namespace
 namespace {
+/// What to ask the shell for the bin's artwork at.
+///
+/// Twice the rect, so the texture has something in hand when the overlay
+/// is drawn on a retina screen — but never below 256, however small the
+/// icon on screen is. That floor is not about the texture: the mouth of
+/// the bin is FOUND in this image, and it is found by the lip's shading,
+/// which at a 32pt Dock icon is about one pixel of a 64px tile. Measured
+/// on the macOS trash, detection is exact at 512 and at 128 and gives up
+/// at 64 — so the floor sits well clear of where the signal runs out.
+/// See core/BinMouth.
+int binIconSize(const QRect &rect)
+{
+    return qMax(256, int(qMax(rect.width(), rect.height()) * 2));
+}
+
 /// Serves the preview's stand-in for the shell's trash artwork to QML, so
 /// dev mode can draw the bin underneath the overlay the way the Dock
 /// does. Dev only: nothing in the shipping path goes through this.
@@ -330,7 +345,7 @@ int main(int argc, char **argv)
         // Full and empty are different artwork; refresh when it flips.
         const QRect ir = target->iconRect();
         if (!ir.isEmpty())
-            fx->setBinIcon(target->iconImage(int(qMax(ir.width(), ir.height()) * 2)));
+            fx->setBinIcon(target->iconImage(binIconSize(ir)));
         if (n > 0)
             power.setEffectIdle(false);
     });
@@ -361,7 +376,7 @@ int main(int argc, char **argv)
         // composited over the swarm. This only works because iconRect()
         // now reports the artwork's true bounds rather than the
         // Accessibility hit area — see visualIconRect().
-        fx->setBinIcon(target->iconImage(int(qMax(r.width(), r.height()) * 2)));
+        fx->setBinIcon(target->iconImage(binIconSize(r)));
     });
 
     // HYPERBIN_DEBUG=1 reports where the overlay thinks it is. Kept because

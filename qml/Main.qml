@@ -59,6 +59,51 @@ Window {
         border.width: 1
     }
 
+    // The measured mouth, drawn over the artwork it was measured from.
+    //
+    // --binmouth only. This is the one thing in the app whose correctness
+    // cannot be judged from the effect that uses it: a tentacle masked
+    // against a mouth ten pixels too low looks like a tentacle that is
+    // slightly wrong, not like a mouth that is. Drawn on the icon, a
+    // wrong answer is obvious in one screenshot.
+    Item {
+        id: mouthDebug
+        visible: windowedMode
+                 && Qt.application.arguments.indexOf("--binmouth") >= 0
+        x: flies.binRect.x
+        y: flies.binRect.y
+        width: flies.binRect.width
+        height: flies.binRect.height
+
+        Rectangle {
+            // The opening. Ellipse via a rounded rectangle: radius at half
+            // the smaller side IS an ellipse, and this needs no Shape.
+            x: (flies.mouthCentre.x - flies.mouthHalfWidth) * parent.width
+            y: (flies.mouthCentre.y - flies.mouthDepth) * parent.height
+            width: flies.mouthHalfWidth * 2 * parent.width
+            height: flies.mouthDepth * 2 * parent.height
+            radius: Math.min(width, height) / 2
+            color: "transparent"
+            border.color: flies.mouthMeasured ? "#ff3030" : "#ffb020"
+            border.width: 2
+        }
+        Rectangle {
+            // The near lip: what an emerging shape has to pass behind.
+            y: (flies.mouthCentre.y + flies.mouthDepth) * parent.height
+            width: parent.width
+            height: 1
+            color: "#30dd50"
+        }
+        Text {
+            y: (flies.mouthCentre.y + flies.mouthDepth) * parent.height + 4
+            color: "#207030"
+            font.pixelSize: 11
+            text: (flies.mouthMeasured ? "measured" : "FALLBACK")
+                  + "  near " + flies.mouthCentre.y.toFixed(3) + "+"
+                  + flies.mouthDepth.toFixed(3)
+        }
+    }
+
     EffectItem {
         id: flies
         objectName: "effect"

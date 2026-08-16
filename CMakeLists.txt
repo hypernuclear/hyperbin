@@ -273,6 +273,7 @@ qt_add_executable(hyperbin
     src/core/EffectRegistry.h
     src/core/DistanceField.cpp
     src/core/DistanceField.h
+    src/core/BinMouth.cpp
     src/core/OozeSim.cpp
     src/core/OozeSim.h
     src/effects/FliesEffect.cpp

@@ -1,38 +1,14 @@
 #include "OozeEffect.h"
 
-#include <QQuick3DTextureData>
+#include "IconTexture.h"
 #include <algorithm>
 #include <cmath>
 
 namespace hyperbin {
 
-/// The bin's artwork, handed to Qt Quick 3D as texture data.
-///
-/// QQuick3DTextureData rather than a file or a QSGTexture: the artwork
-/// comes from the shell at runtime, changes when the bin fills or
-/// empties, and never exists on disk.
-class OozeTextureData : public QQuick3DTextureData
-{
-    Q_OBJECT
-public:
-    void setImage(const QImage &img)
-    {
-        if (img.isNull()) {
-            setTextureData({});
-            return;
-        }
-        const QImage rgba = img.convertToFormat(QImage::Format_RGBA8888);
-        setSize(rgba.size());
-        setFormat(QQuick3DTextureData::RGBA8);
-        setHasTransparency(true);
-        setTextureData(QByteArray(reinterpret_cast<const char *>(rgba.constBits()),
-                                  qsizetype(rgba.sizeInBytes())));
-    }
-};
-
 OozeEffect::OozeEffect(QObject *parent)
     : Effect(parent)
-    , m_iconTexture(new OozeTextureData)
+    , m_iconTexture(new IconTexture)
 {
 }
 
@@ -544,5 +520,3 @@ void OozeEffect::updateEyes()
 }
 
 } // namespace hyperbin
-
-#include "OozeEffect.moc"

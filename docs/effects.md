@@ -114,6 +114,49 @@ Two things it took several wasted rounds to learn:
   all. `HYPERBIN_PREVIEW_SHOT_MS` exists for exactly that: shoot the same
   scene half a second apart and difference the two.
 
+## Bringing in a model
+
+Most geometry here is generated, not imported — `OozeGeometry.cpp` sweeps
+the whole gel body from a measured profile, and that is the pattern to
+reach for first. Import a model when the shape is *sculpted* and could not
+be described by a profile and a few numbers.
+
+There is no runtime asset loading. `Quick3DAssetImport` is not linked, and
+`scripts/package-macos.sh` prunes the asset-loading plugins on the way into
+the DMG. Models are converted **once, by hand**, and the converted output
+is what ships:
+
+```
+$QT_ROOT/bin/balsam --generateMipMaps -o resources/ model.glb
+```
+
+Keep the `.mesh` and the maps; throw away the `.qml` balsam writes beside
+them — it is a scene wrapper this app has no use for. Commit the source
+`.glb` under `assets/` so the conversion can be repeated; the eye mesh's
+source was not kept, and it cannot be regenerated or adjusted.
+
+Files under `resources/` reach QML through the `hyperbin_icons` block in
+`CMakeLists.txt`, which is `PREFIX "/icons" BASE resources`. So
+`resources/meshes/eye.mesh` is `qrc:/icons/meshes/eye.mesh` — the `/icons`
+prefix is inherited by everything in that bucket whether or not it is an
+icon.
+
+Two things worth knowing before modelling:
+
+* **Detail below a couple of pixels is wasted.** The bin is drawn around
+  49 points across. Put surface detail in the normal and albedo maps,
+  where there is a pixel to hold it, and keep the silhouette simple.
+* **Drop what will not be seen.** The eye model's cornea was a second,
+  transparent mesh; it was left out because a transparent PBR shell costs
+  a full extra pass to produce a highlight that is sub-pixel here.
+
+Animation clips are a separate question and the answer so far has been no:
+balsam emits them as `QtQuick.Timeline`, which is a module this app does
+not link and the packaging script does not ship. Skinning
+(`Skeleton`/`Joint`) is part of `QtQuick3D` proper and costs nothing extra,
+but the house pattern is one static mesh deformed in its vertex shader —
+see `shaders/ooze3d.vert`.
+
 ## Colour, if you write a Quick3D material
 
 Three things about Qt's pipeline that are not obvious and each cost a

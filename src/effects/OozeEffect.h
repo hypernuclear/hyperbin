@@ -19,7 +19,7 @@
 
 namespace hyperbin {
 
-class OozeTextureData;
+class IconTexture;
 
 class OozeEffect : public Effect
 {
@@ -206,7 +206,7 @@ private:
     bool    m_wasEmpty = true;
     QVector<quint8> m_coverage;
     int m_covW = 0, m_covH = 0;
-    OozeTextureData *m_iconTexture = nullptr;
+    IconTexture *m_iconTexture = nullptr;
 };
 
 } // namespace hyperbin

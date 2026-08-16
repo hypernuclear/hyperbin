@@ -278,7 +278,9 @@ qt_add_executable(hyperbin
     src/core/OozeSim.h
     src/effects/FliesEffect.cpp
     src/effects/FliesEffect.h
+    src/effects/IconTexture.cpp
     src/effects/OozeEffect.cpp
+    src/effects/TentacleEffect.cpp
     src/effects/OozeEffect.h
     src/effects/OozeGeometry.cpp
     src/effects/OozeGeometry.h
@@ -306,6 +308,7 @@ qt_add_qml_module(hyperbin
         qml/BinGlyph.qml
         qml/OozeVisual.qml
         qml/OozeEyes.qml
+        qml/TentacleVisual.qml
         qml/Permissions.qml
         qml/Splash.qml
         qml/HyperbinLockup.qml
@@ -361,14 +364,18 @@ qt_add_resources(hyperbin "hyperbin_icons"
         # that silently falls back to the system UI face on every machine
         # but the one it was designed on is not a brand.
         resources/Inter-SemiBold.ttf
-        # The eyeballs in the goo. Converted from a glTF with balsam;
-        # see docs/effects.md. The source model's cornea is a second,
+        # The eyeballs in the goo. Converted from a glTF with balsam — see
+        # "Bringing in a model" in docs/effects.md for the command and what
+        # to keep. The source model's cornea is a second,
         # transparent mesh — left out on purpose, because a transparent
         # PBR shell costs a full extra pass to produce a highlight that
         # is sub-pixel at the size this is drawn.
         resources/meshes/eye.mesh
         resources/maps/eye_albedo.jpg
         resources/maps/eye_normal.png
+        resources/meshes/tentacle.mesh
+        resources/maps/tentacle_albedo.jpg
+        resources/maps/tentacle_normal.png
 )
 qt_add_resources(hyperbin "hyperbin_shaders3d"
     PREFIX "/shaders3d"
@@ -378,6 +385,8 @@ qt_add_resources(hyperbin "hyperbin_shaders3d"
         shaders/ooze3d.frag
         shaders/eye3d.vert
         shaders/eye3d.frag
+        shaders/tentacle.vert
+        shaders/tentacle.frag
 )
 
 # Headless swarm check. No GUI, so it runs on CI and under the debugger

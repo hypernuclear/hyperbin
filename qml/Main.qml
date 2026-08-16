@@ -25,7 +25,7 @@ Window {
     color: windowedMode ? "#cfcac2"
                         : (paintDebug ? "#80ff0000" : "transparent")
     width: 480
-    height: 480
+    height: 540
     visible: windowedMode
 
     // The bin itself, UNDER the overlay — the position the shell draws it
@@ -116,7 +116,11 @@ Window {
                 // Big, so an effect can be judged. The overlay's real
                 // margins are proportional to the icon, so this is the
                 // same geometry the Dock produces, just larger.
-                binRect = Qt.rect(90, 40, 300, 300);
+                // Headroom above for anything that reaches OUT of the
+                // bin — tentacles clear the rim by about a fifth of the
+                // icon and were being clipped by the window. The room
+                // below is unchanged, which the ooze needs for its drips.
+                binRect = Qt.rect(90, 100, 300, 300);
                 // HYPERBIN_PREVIEW_FULL pins the slider, so anything that
                 // scales with fullness — the ooze's level, how many eyes
                 // surface — can be shot at a chosen value instead of

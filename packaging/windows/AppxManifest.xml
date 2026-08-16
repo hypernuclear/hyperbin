@@ -9,16 +9,22 @@
   <!--
     MSIX manifest for hyperbin.
 
-    {{VERSION}} and {{ARCH}} are substituted by CI before packaging.
+    {{MSIX_VERSION}} and {{ARCH}} are substituted by CI before packaging.
     Publisher must match the Subject of the signing certificate exactly,
     character for character — makeappx will pack a mismatched one
     happily and Windows will refuse to install it.
+
+    MSIX_VERSION is NOT the version the app calls itself. The schema here
+    admits four dot-separated integers and nothing else, so a display
+    version carrying any suffix — "1.0.0-pr4", "1.0.0-dev" — fails to
+    pack at all. That is not hypothetical: every pull request built here
+    died on it, because the display version is only clean on a tag.
   -->
 
   <Identity
     Name="Hypernuclear.Hyperbin"
     Publisher="CN=hypernuclear, O=hypernuclear, L=Henderson, S=Nevada, C=US"
-    Version="{{VERSION}}.0"
+    Version="{{MSIX_VERSION}}"
     ProcessorArchitecture="{{ARCH}}" />
 
   <Properties>

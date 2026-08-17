@@ -150,6 +150,101 @@ Two things worth knowing before modelling:
   transparent mesh; it was left out because a transparent PBR shell costs
   a full extra pass to produce a highlight that is sub-pixel here.
 
+### How many triangles
+
+Fewer than feels right, and the limit is not performance.
+
+Three arms of 3,000 vertices at 30fps is 270,000 vertex-shader invocations
+a second, which is nothing — what this app pays for is frame cadence and
+keeping the GPU from idling, and per-vertex work is below fill cost in
+`docs/battery.md`, which already calls fill "effectively free at this
+size". Triangles are free. Frames are not. So the budget is set by the
+point where more geometry stops *showing*, not by a cost ceiling.
+
+That point can be worked out rather than guessed. A tube of screen radius
+`r` px approximated with `K` sides deviates from the circle by
+`r(1 - cos(pi/K))`, so keeping the facets under half a pixel needs
+`K > pi / acos(1 - 0.5/r)`:
+
+| drawn at | arm radius | sides needed |
+| --- | --- | --- |
+| 49pt Dock icon, 2x | 12 px | 11 |
+| 96pt Dock icon, 2x | 24 px | 16 |
+
+**Sixteen sides** covers a Dock icon twice the default size. The same sum
+along the arm, against the outer edge of the sharpest strike (4.4 radians —
+see `TentacleEffect::kArmLength`), wants **20 to 24 rings**. That is the
+*floor* — about 500 triangles — not a target. 2,000 is comfortable: 24
+sides by 42 rings, which is round enough for a Dock icon four times the
+default and nearly twice the rings the sharpest strike needs.
+
+**Count vertices, not triangles.** The bend runs in the vertex shader and
+the `.mesh` file is 67 bytes per vertex, so vertices are the number that
+costs — and the two are not proportional. The arm in the tree is 6,568
+triangles for 4,070 vertices; a downloaded model it replaced was 2,728
+triangles for **2,920** vertices, from only **1,375 unique positions**. 53%
+of that one was a single position exported more than once — not flat
+shading (just 63 of 1,209 shared positions carried different normals) but a
+UV map in many islands, on a mesh whose positions had been welded and whose
+UVs had not. Blender's statistics showed 1,375 and gave no hint of it.
+
+So a *larger* triangle count, unwrapped with one seam, can cost a third of
+a smaller one. Check the vertex count after export, not in the viewport.
+
+Two things that model got wrong and are worth not repeating:
+
+* **Distribution.** It put 45% of its vertices in the top quarter of the
+  arm, where the radius had fallen to 1–2.7 units of a 12.5-unit base —
+  below a pixel at Dock size — while the thick part that is actually seen
+  got 80 vertices a band. That is what decimating a sculpt does. Build the
+  low-poly tube first, sculpt on a multires or duplicated copy, and bake
+  down; then the budget lands where it was put rather than where the
+  decimator left it.
+* **Taper.** It fell to a tenth of its peak radius by the tip, so most of
+  its length was thin whatever it was scaled by, and the girth multiplier
+  in `TentacleVisual.qml` was fighting that rather than setting it. The
+  replacement holds a third of its peak at the tip and reads as thick along
+  its whole length on its own — measured on screen, its cross-section
+  varies only between 0.12 and 0.16 of the bin's width from mid-arm to tip.
+
+### Low-poly that does not look low-poly
+
+* **Smooth (averaged) vertex normals.** The single biggest lever, and it is
+  free: a 16-sided tube shaded smooth reads as round, and the same tube
+  flat-shaded reads as a hex bolt. In Blender that is Shade Smooth with no
+  Edge Split modifier and no custom split normals. A vertex count above the
+  triangle count is the tell that something is splitting them.
+* **The silhouette is the only thing a normal map cannot fake.** So spend
+  geometry on exactly two things — how round the tube is, and how smoothly
+  it bends — and put suckers, wrinkles and veins in the maps, baked from a
+  high-poly sculpt. `shaders/tentacle.frag` already reads a normal map
+  through `TANGENT`/`BINORMAL`, so export tangents and one UV map or its
+  orientation is undefined.
+* **Do not taper to a point.** The last rings of a spike are sub-pixel and
+  only shimmer. End on a small rounded cap.
+* **Taper less than looks right in the viewport.** The current model is at
+  55% of its base radius by mid-length and 21% by three-quarters, which is
+  why it reads as thin however it is scaled — scaling cannot fix a taper.
+* **A cylindrical unwrap with one seam on the underside** keeps the maps
+  continuous along the arm. A non-square texture (256x1024) spends its
+  texels evenly on something five times longer than it is wide.
+
+### What the vertex shader expects of the mesh
+
+`shaders/tentacle.vert` bends the arm from `VERTEX.y` alone, so the mesh
+carries a contract and no rig — a skeleton was tried and went unused,
+because nothing needs a joint to know how far along an arm a vertex sits:
+
+* **Straight up +Y, base at the origin**, and the axis on `x = z = 0`. The
+  shader splits `VERTEX.xz` into the bend plane and across it, treating it
+  as an offset from the centre line; the current import's axis is off by
+  about 1.9 units, which it silently carries through the bend.
+* **Apply every transform before export.** An unapplied armature scale of
+  15.5 cost a debugging session once already.
+* **Author it 100 units long.** The length goes into the shader as a
+  literal (`meshLength`), so a round number is one less magic constant.
+* **No animation actions.**
+
 Animation clips are a separate question and the answer so far has been no:
 balsam emits them as `QtQuick.Timeline`, which is a module this app does
 not link and the packaging script does not ship. Skinning

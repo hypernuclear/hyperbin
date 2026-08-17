@@ -375,7 +375,7 @@ qt_add_resources(hyperbin "hyperbin_icons"
         resources/maps/eye_normal.png
         resources/meshes/tentacle.mesh
         resources/maps/tentacle_albedo.jpg
-        resources/maps/tentacle_normal.png
+        resources/maps/tentacle_normal.jpg
 )
 qt_add_resources(hyperbin "hyperbin_shaders3d"
     PREFIX "/shaders3d"

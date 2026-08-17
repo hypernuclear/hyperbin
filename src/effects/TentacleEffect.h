@@ -18,6 +18,8 @@
 
 #include <QImage>
 #include <QSizeF>
+#include <QVariantList>
+#include <QVector4D>
 #include <QVector>
 
 namespace hyperbin {
@@ -60,6 +62,43 @@ class TentacleEffect : public Effect
     Q_PROPERTY(float mouthHalfWidth READ mouthHalfWidth NOTIFY shapeChanged)
     Q_PROPERTY(float mouthDepthFraction READ mouthDepthFraction NOTIFY shapeChanged)
     Q_PROPERTY(bool mouthMeasured READ mouthMeasured NOTIFY shapeChanged)
+    /// One entry per arm that is out: (curl, curlDirection, 0, 0).
+    ///
+    /// curl      how far it bends over its whole length, radians
+    /// curlDir   which way that bend leans, radians in the scene
+    ///
+    /// Handed straight to the arm's vertex shader. Kept here rather than
+    /// in QML because the slap is a simulation with a clock and a cycle,
+    /// and everything of that kind in this app lives in step().
+    Q_PROPERTY(QVariantList arms READ arms NOTIFY frameChanged)
+
+    /// Where each arm SITS, as (lateral, depth, size, 0). Constant.
+    ///
+    /// lateral   across the opening, as a fraction of its half-width
+    /// depth     into the opening: -1 at the far lip, +1 at the near one
+    /// size      a scale for the whole arm — see kSeats
+    ///
+    /// Fractions rather than scene units because the conversion from the
+    /// second one needs the camera's tilt, and the camera lives in QML.
+    Q_PROPERTY(QVariantList seats READ seats CONSTANT)
+
+    /// How long an arm is, in scene units. Derived from the bin, because
+    /// what an arm has to be able to do is reach over the rim and down
+    /// the outside, and how far that is is set by the bin's own size.
+    Q_PROPERTY(float armLength READ armLength NOTIFY shapeChanged)
+
+    /// The RUBBISH, as a place in the scene rather than as a picture.
+    ///
+    /// Both in scene units, +y up from the centre of the bin's rect: the
+    /// top of the heap and the level below which it is simply solid. The
+    /// heap is what an arm at the back of the mouth has to pass behind,
+    /// and it cannot do that against something with no depth — see
+    /// shaders/tentacle.frag.
+    Q_PROPERTY(float heapTopY READ heapTopY NOTIFY shapeChanged)
+    Q_PROPERTY(float heapFloorY READ heapFloorY NOTIFY shapeChanged)
+    /// How high an arm's root sits, scene units. Below the opening: it is
+    /// meant to be buried in the rubbish.
+    Q_PROPERTY(float rootY READ rootY NOTIFY shapeChanged)
 
 public:
     explicit TentacleEffect(QObject *parent = nullptr);
@@ -92,9 +131,16 @@ public:
     float level() const { return m_level; }
     int count() const;
     int maxTentacles() const { return kMaxTentacles; }
+    QVariantList arms() const { return m_arms; }
+    QVariantList seats() const;
+    float armLength() const;
     QSizeF binSize() const { return m_binSize; }
     QRectF binRect() const { return m_binRect; }
     QObject *iconTexture() const;
+
+    float heapTopY() const;
+    float heapFloorY() const;
+    float rootY() const;
 
     float mouthX() const;
     float mouthY() const;
@@ -111,9 +157,119 @@ signals:
     void shapeChanged();
 
 private:
-    /// The most that can ever be out. Small: each is its own chain of
-    /// draw calls until this stops being a placeholder.
-    static constexpr int kMaxTentacles = 5;
+    /// The most that can ever be out — one draw call each.
+    static constexpr int kMaxTentacles = 3;
+
+    /// An arm's place in the bin, and what it does from there.
+    struct Seat
+    {
+        float lateral;  ///< across the opening, fraction of its half-width
+        float depth;    ///< into it: -1 at the far lip, +1 at the near one
+        float size;     ///< scale for the whole arm, for fake perspective
+        float strike;   ///< which way it lashes, radians, 0 = at the camera
+        float swing;    ///< how far that direction wanders, radians
+    };
+
+    /// A TRIANGLE, apex at the back — one arm behind two.
+    ///
+    /// This was a golden-angle spread, which is the right answer for a
+    /// dozen things that must not clump and the wrong one for three, where
+    /// it just reads as three arms at arbitrary angles. A triangle has a
+    /// front and a back, and under an ORTHOGRAPHIC camera that is worth
+    /// arranging deliberately: there is no perspective to shrink the far
+    /// one, so every depth cue has to be built. The three here are the
+    /// back arm being occluded by the rubbish (shaders/tentacle.frag),
+    /// crossing in front of each other, and `size`.
+    ///
+    /// `size` is fake perspective, and it is fake on purpose: an ortho
+    /// camera genuinely does not shrink with distance, so the far arm is
+    /// scaled down by hand. Small — eight per cent — because the cue only
+    /// has to nudge; overdone it reads as three different creatures.
+    ///
+    /// Seated well inside the rim, not on it. The strike has to have
+    /// somewhere to go: an arm rooted at 0.8 of the opening's half-width
+    /// is already almost at the wall, and the curl that would carry it
+    /// there is so slack that it barely bends. Measured, an arm on the
+    /// centre line needs to travel the whole radius, which is what sets
+    /// how long an arm has to be — see kArmLength.
+    ///
+    /// The back arm strikes SIDEWAYS, and it has to. Outward for an arm at
+    /// the back of the mouth means away from the camera, so a strike along
+    /// its own radius would flop over the far rim and down the back of the
+    /// bin where none of it can be seen. Its swing is wide enough to take
+    /// it over either side, which is also what makes it cross the front
+    /// pair often enough for the occlusion to do its work.
+    /// The front pair strike FORWARD of their own radius, not along it.
+    ///
+    /// How far out a strike lands is solved from the lateral part of its
+    /// direction alone (see updateArms), so leaning it forward does not
+    /// change where the tip arrives across the bin — only how near the
+    /// camera it gets there. Along its own radius the arm came down exactly
+    /// on the bin's silhouette edge and read as passing beside the bin
+    /// rather than landing on it. Forward of it, the arm clears the front
+    /// wall and is drawn over the bin's face, which is the only way a slap
+    /// can show contact with anything.
+    static constexpr Seat kSeats[kMaxTentacles] = {
+        //  lateral  depth   size   strike  swing
+        {      0.00f, -0.80f, 0.92f,  1.45f, 1.15f },  // back, centre
+        {     -0.62f,  0.40f, 1.06f, -0.75f, 0.28f },  // front left
+        {      0.62f,  0.40f, 1.06f,  0.75f, 0.28f },  // front right
+    };
+
+    /// An arm's length, as a fraction of the bin's height.
+    ///
+    /// DERIVED, not chosen. The demanding case is the arm on the centre
+    /// line: for its tip to clear the side rim and come to rest a quarter
+    /// of the bin down the outside, it has to travel the opening's full
+    /// half-width outward while dropping that quarter. An arc that does
+    /// both has (1-cos c)/-sin c = 1.33, so c = 4.43, and the length that
+    /// then puts the tip on the wall is 1.15 bin heights.
+    ///
+    /// This was 0.55 and the arms could not reach: at that length the
+    /// widest a strike can ever throw the tip is 0.64 x 0.55 = 0.35 bin
+    /// heights, against the 0.37 needed just to arrive at the wall with
+    /// nothing left over to come down it. Slack curls looked like a
+    /// gesture at the bin rather than a hit on it, and no amount of tuning
+    /// the ANGLE could have fixed a length that was short.
+    static constexpr float kArmLength = 1.15f;
+
+    /// Where a strike aims, as a share of the opening's half-width.
+    ///
+    /// Not 1.0: the bin TAPERS, and a strike lands below the rim rather
+    /// than on it. Measured on the macOS trash, the body is 0.98 of the
+    /// opening at the lip and 0.93 a quarter of the way down, which is
+    /// where the tip of a 4.4-radian curl arrives.
+    static constexpr float kStrikeTarget = 0.94f;
+
+    /// How high the rubbish stands above the opening, and how far below it
+    /// stays solid. Both fractions of the bin's height.
+    ///
+    /// The rise is MEASURED, not assumed: differencing the topmost opaque
+    /// row of the full macOS trash against the empty one, column by
+    /// column, the rubbish stands proud of the rim by up to 55 rows of a
+    /// 512px tile — 0.107 — and that peak is the newspaper on the left.
+    /// (Over most columns it does not clear the rim at all, which is why
+    /// the heap is trimmed against the artwork's own alpha rather than
+    /// trusted as a shape.)
+    ///
+    /// The floor is not measured because it cannot be: nothing in the
+    /// artwork says how deep the rubbish goes. It only has to be deeper
+    /// than an arm's root, so that a root reads as buried in the rubbish
+    /// instead of sitting on it.
+    static constexpr float kHeapRise = 0.107f;
+    static constexpr float kHeapSink = 0.22f;
+
+    /// How far below the opening an arm's root starts. Buried, so the arm
+    /// comes OUT of the rubbish rather than beginning at its surface, and
+    /// no deeper than that — every unit below here is arm that is never
+    /// seen.
+    static constexpr float kRootDepth = 0.10f;
+
+    /// Recompute each arm's curl and where it is swinging. Every step.
+    void updateArms();
+
+    /// The curl that throws the tip `outward` scene units sideways.
+    float curlForReach(float outward) const;
 
     BinMouth m_mouth;
     QSizeF m_binSize {40.0, 40.0};
@@ -123,6 +279,7 @@ private:
     float m_vel = 0.0f;
     float m_target = 0.0f;
     bool m_wasEmpty = true;
+    QVariantList m_arms;
     IconTexture *m_iconTexture = nullptr;
 };
 

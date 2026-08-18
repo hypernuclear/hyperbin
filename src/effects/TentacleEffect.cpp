@@ -306,10 +306,19 @@ QVector3D TentacleEffect::armTarget(int i, float &flex, float &maxBend) const
     const QVector3D rel = cursor - base;
     if (rel.length() > L * 0.95f)
         toward = base + rel.normalized() * (L * 0.95f);
-    const QVector3D leaned = idle + (toward - idle) * (pull * 0.55f);
+    // The move poses the arm from its plain drift. The cursor is applied
+    // AFTERWARDS — see the blend at the bottom — because it has to be able
+    // to override a move rather than be overridden by one.
+    //
+    // It used to be folded in here, into a `leaned` pose that every move
+    // then blended away FROM: a slap ramping to full took the arm from the
+    // pointer back to the bin, so hovering while anything was mid-move
+    // looked like the two were fighting. They were, and the move won.
+    const QVector3D leaned = idle;
+    QVector3D posed = leaned;
     switch (st.move) {
     case Move::Idle:
-        return leaned;
+        posed = leaned; break;
     case Move::Slap: {
         // Out fast, held, drawn back slowly -- the asymmetry is the whole
         // of what makes it read as a hit rather than a wave.
@@ -348,7 +357,8 @@ QVector3D TentacleEffect::armTarget(int i, float &flex, float &maxBend) const
         const QVector3D wall(std::copysign(binHalfWidthAt(wallY) * 0.98f, out.x()),
                              wallY,
                              out.z() * mouthReachZ() * 0.55f);
-        return leaned + (wall - leaned) * hit;
+        posed = leaned + (wall - leaned) * hit;
+        break;
     }
     case Move::Coil: {
         // Curled right up, tip brought back near its own root. Needs the
@@ -362,7 +372,8 @@ QVector3D TentacleEffect::armTarget(int i, float &flex, float &maxBend) const
         const QVector3D knot = base
             + QVector3D(0.0f, 1.0f, 0.0f) * (L * 0.16f)
             + out * (mouthRadius() * 0.35f);
-        return leaned + (knot - leaned) * c;
+        posed = leaned + (knot - leaned) * c;
+        break;
     }
     case Move::Wrap: {
         // The tip travels ROUND the bin rather than to a point on it, so
@@ -377,7 +388,8 @@ QVector3D TentacleEffect::armTarget(int i, float &flex, float &maxBend) const
         const QVector3D around(std::sin(turn) * binHalfWidthAt(ringY) * 0.98f,
                                ringY,
                                std::cos(turn) * mouthReachZ() * 0.85f);
-        return leaned + (around - leaned) * ring;
+        posed = leaned + (around - leaned) * ring;
+        break;
     }
     case Move::Roll:
         // The target barely matters here -- the shape comes from curlUp,
@@ -399,7 +411,8 @@ QVector3D TentacleEffect::armTarget(int i, float &flex, float &maxBend) const
         // anything past that has segments doubling back through their own
         // neighbours.
         maxBend = 1.32f;
-        return leaned;
+        posed = leaned;
+        break;
     case Move::Reach: {
         // The full lunge, on top of the lean every arm already has. The
         // pointer arrives in the host item's pixels with +y DOWN and the
@@ -407,10 +420,19 @@ QVector3D TentacleEffect::armTarget(int i, float &flex, float &maxBend) const
         // mouth measurements get.
         const float ring = smooth(std::min(u * 2.5f, 1.0f))
                          * (1.0f - smooth(std::max((u - 0.80f) / 0.20f, 0.0f)));
-        return leaned + (toward - leaned) * ring;
+        posed = leaned + (toward - leaned) * ring;
+        break;
     }
     }
-    return leaned;
+    // The pointer has the last word.
+    //
+    // Applied over whatever the move decided, at nearly full authority, so
+    // a hovering pointer visibly commands the arms instead of negotiating
+    // with them. Not 1.0: leaving a little of the pose in stops the arms
+    // converging into one bundle at the cursor, and lets a strike still
+    // read as a strike while it happens to be aimed nearby.
+    constexpr float kCursorAuthority = 0.88f;
+    return posed + (toward - posed) * (pull * kCursorAuthority);
 }
 QVector3D TentacleEffect::retreatTarget(int i, float &flex, float &sink) const
 {

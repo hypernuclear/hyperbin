@@ -256,8 +256,8 @@ private:
     static constexpr Seat kSeats[kMaxTentacles] = {
         //  lateral  depth   size   strike  swing
         {      0.00f, -0.80f, 0.92f,  1.45f, 1.15f },  // back, centre
-        {     -0.62f,  0.12f, 1.06f, -0.75f, 0.28f },  // front left
-        {      0.62f,  0.12f, 1.06f,  0.75f, 0.28f },  // front right
+        {     -0.62f,  0.12f, 0.78f, -0.75f, 0.28f },  // front left
+        {      0.62f,  0.12f, 0.78f,  0.75f, 0.28f },  // front right
     };
 
     /// An arm's length, as a fraction of the bin's height.

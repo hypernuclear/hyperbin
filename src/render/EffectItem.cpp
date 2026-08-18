@@ -341,6 +341,20 @@ void EffectItem::tick()
 
 QPointF EffectItem::cursorLocal() const
 {
+    // Dev harness: HYPERBIN_PREVIEW_CURSOR=x,y pins the pointer, in this
+    // item's own coordinates. A grab-and-exit preview cannot move the real
+    // mouse, so anything that reacts to the pointer is otherwise
+    // untestable without sitting in front of the app waving at it — which
+    // is exactly the kind of "looks about right" verification that has
+    // been wrong twice in this file already.
+    static const QPointF pinned = [] {
+        const QStringList v = qEnvironmentVariable("HYPERBIN_PREVIEW_CURSOR")
+                                  .split(QLatin1Char(','), Qt::SkipEmptyParts);
+        return v.size() == 2 ? QPointF(v[0].toDouble(), v[1].toDouble())
+                             : QPointF(qQNaN(), qQNaN());
+    }();
+    if (!qIsNaN(pinned.x()))
+        return pinned;
     return mapFromGlobal(QPointF(QCursor::pos()));
 }
 

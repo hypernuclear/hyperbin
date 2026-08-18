@@ -228,9 +228,35 @@ QVector3D TentacleEffect::armTarget(int i, float &flex, float &maxBend) const
         // arm it was 290 units on a bin only 160 deep, so an idle wave
         // carried the tip clear past the bin's own footprint.
         + out * (mouthRadius() * (1.00f + 0.35f * std::sin(m_time * 0.31f + sb * 6.28f)));
+    // Where the pointer is, in scene units, and how much to care.
+    //
+    // CONTINUOUS, and that is the fix rather than a tuning: reaching used
+    // to be a move, so an arm only noticed the pointer when its previous
+    // move happened to end AND a dice roll came up, which is an occasional
+    // lunge and reads as not tracking at all. Every arm now leans a little
+    // toward a nearby pointer whatever else it is doing, and the Reach
+    // move is the stronger version on top.
+    //
+    // Faded out with distance because the host polls the pointer every
+    // frame and always reports it present — it is click-through and gets
+    // no enter or leave events — so "present" says nothing about whether
+    // it is anywhere near the bin.
+    const QVector3D cursor(float(m_cursor.x() - m_binRect.center().x()),
+                           float(m_binRect.center().y() - m_cursor.y()),
+                           0.0f);
+    const float away = (cursor - base).length();
+    const float near0 = binH * 0.9f, far0 = binH * 2.4f;
+    const float pull = 1.0f - smooth((away - near0) / std::max(far0 - near0, 1.0f));
+    // Clamped to the arm's own reach, or an arm asked for something across
+    // the screen simply points at it and stops looking like an arm.
+    QVector3D toward = cursor;
+    const QVector3D rel = cursor - base;
+    if (rel.length() > L * 0.95f)
+        toward = base + rel.normalized() * (L * 0.95f);
+    const QVector3D leaned = idle + (toward - idle) * (pull * 0.55f);
     switch (st.move) {
     case Move::Idle:
-        return idle;
+        return leaned;
     case Move::Slap: {
         // Out fast, held, drawn back slowly -- the asymmetry is the whole
         // of what makes it read as a hit rather than a wave.
@@ -254,7 +280,7 @@ QVector3D TentacleEffect::armTarget(int i, float &flex, float &maxBend) const
         const QVector3D wall(std::copysign(binHalfWidthAt(wallY) * 0.98f, out.x()),
                              wallY,
                              out.z() * mouthReachZ() * 0.55f);
-        return idle + (wall - idle) * hit;
+        return leaned + (wall - leaned) * hit;
     }
     case Move::Coil: {
         // Curled right up, tip brought back near its own root. Needs the
@@ -268,7 +294,7 @@ QVector3D TentacleEffect::armTarget(int i, float &flex, float &maxBend) const
         const QVector3D knot = base
             + QVector3D(0.0f, 1.0f, 0.0f) * (L * 0.16f)
             + out * (mouthRadius() * 0.35f);
-        return idle + (knot - idle) * c;
+        return leaned + (knot - leaned) * c;
     }
     case Move::Wrap: {
         // The tip travels ROUND the bin rather than to a point on it, so
@@ -283,28 +309,19 @@ QVector3D TentacleEffect::armTarget(int i, float &flex, float &maxBend) const
         const QVector3D around(std::sin(turn) * binHalfWidthAt(ringY) * 0.98f,
                                ringY,
                                std::cos(turn) * mouthReachZ() * 0.85f);
-        return idle + (around - idle) * ring;
+        return leaned + (around - leaned) * ring;
     }
     case Move::Reach: {
-        // After the pointer. The overlay is click-through and never gets
-        // hover events, so this arrives polled -- but it is in the host
-        // item's pixels with +y DOWN, and the scene is bin-local with +y
-        // UP, so it needs the same conversion the mouth measurements get.
-        const float rx = float(m_cursor.x() - m_binRect.center().x());
-        const float ry = float(m_binRect.center().y() - m_cursor.y());
+        // The full lunge, on top of the lean every arm already has. The
+        // pointer arrives in the host item's pixels with +y DOWN and the
+        // scene is bin-local with +y UP, which is the same conversion the
+        // mouth measurements get.
         const float ring = smooth(std::min(u * 2.5f, 1.0f))
                          * (1.0f - smooth(std::max((u - 0.80f) / 0.20f, 0.0f)));
-        // Clamped to the arm's own reach, or an arm asked for something
-        // across the screen simply points at it and stops looking like an
-        // arm at all.
-        QVector3D want(rx, ry, 0.0f);
-        const QVector3D rel = want - base;
-        if (rel.length() > L * 0.95f)
-            want = base + rel.normalized() * (L * 0.95f);
-        return idle + (want - idle) * ring;
+        return leaned + (toward - leaned) * ring;
     }
     }
-    return idle;
+    return leaned;
 }
 float TentacleEffect::binHalfWidthAt(float y) const
 {
@@ -340,7 +357,12 @@ void TentacleEffect::updateArms()
         float flex = 1.0f;
         float maxBend = TentacleChain::kMaxBend;
         const QVector3D target = armTarget(i, flex, maxBend);
-        m_chain[i].solve(base, target, m_time,
+        // Leaves the hole going UP and a little outward, whatever it is
+        // reaching for. See TentacleChain::kRootHeld.
+        const Seat &seat = kSeats[i];
+        const QVector3D emerge = QVector3D(std::sin(seat.strike) * 0.22f, 1.0f,
+                                           std::cos(seat.strike) * 0.10f).normalized();
+        m_chain[i].solve(base, emerge, target, m_time,
                          armHash(float(i), 3.0f) * 6.28318531f, flex, maxBend);
     }
     m_spine->setChains(m_chain, n, kMaxTentacles);

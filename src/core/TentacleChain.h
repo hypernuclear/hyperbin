@@ -61,7 +61,11 @@ public:
     /// separates a reach from a coil: at the default an arm cannot close a
     /// circle over its sixteen joints, and a move that is supposed to curl
     /// right round needs to be allowed to.
-    void solve(const QVector3D &base, const QVector3D &target,
+    /// `emerge` is the direction the arm leaves its hole in. The first
+    /// few joints are held onto it — see holdRoot for why that is not
+    /// optional once an arm is asked to reach a long way sideways.
+    void solve(const QVector3D &base, const QVector3D &emerge,
+               const QVector3D &target,
                float time, float phase, float flex, float maxBend);
 
     bool valid() const { return m_seg > 0.0f; }
@@ -78,6 +82,20 @@ private:
     void fabrik(const QVector3D &base, const QVector3D &target);
     void constrain(const QVector3D &base, float maxBend);
     void limitBend(float maxBend);
+    void holdRoot(const QVector3D &base, const QVector3D &emerge);
+    /// How many joints the hole grips.
+    ///
+    /// FABRIK anchors the base POSITION and nothing else, so an arm asked
+    /// for something far to one side satisfies it by swinging everything
+    /// including its first segment — the anchor stays put but the arm
+    /// leaves it at a new angle, and what the eye reads as "the base" is
+    /// the first visible stretch, not the anchored point. Wrapping round
+    /// the bin looked like the whole tentacle sliding around the rim.
+    ///
+    /// Holding four of sixteen is about a quarter of the arm, which is
+    /// roughly what is buried in the rubbish and passing through the
+    /// opening — the part that physically could not swing.
+    static constexpr int kRootHeld = 4;
     void applyWave(float time, float phase, float flex);
     void buildFrames();
 

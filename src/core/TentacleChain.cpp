@@ -25,7 +25,8 @@ void TentacleChain::reset(const QVector3D &base, const QVector3D &d, float lengt
     buildFrames();
 }
 
-void TentacleChain::solve(const QVector3D &base, const QVector3D &target,
+void TentacleChain::solve(const QVector3D &base, const QVector3D &emerge,
+                          const QVector3D &target,
                           float time, float phase, float flex, float maxBend)
 {
     if (!valid())
@@ -37,8 +38,10 @@ void TentacleChain::solve(const QVector3D &base, const QVector3D &target,
     // arm visibly lengthens and shortens as the wave runs down it.
     fabrik(base, target);
     constrain(base, maxBend);
+    holdRoot(base, emerge);
     applyWave(time, phase, flex);
     constrain(base, maxBend);
+    holdRoot(base, emerge);
     buildFrames();
 }
 
@@ -122,6 +125,19 @@ void TentacleChain::limitBend(float maxBend)
     }
 }
 
+void TentacleChain::holdRoot(const QVector3D &base, const QVector3D &emerge)
+{
+    // Pull the first joints back onto the line the arm leaves its hole
+    // along, fading out over the held span so there is no crease where the
+    // hold stops. Run AFTER the length pass and before the next one, so
+    // whatever it moves gets its segments fixed again.
+    const QVector3D u = dir(emerge, QVector3D(0, 1, 0));
+    for (int i = 1; i <= kRootHeld && i < kJoints; ++i) {
+        const float w = 1.0f - float(i - 1) / float(kRootHeld);
+        const QVector3D want = base + u * (m_seg * float(i));
+        m_p[i] += (want - m_p[i]) * w;
+    }
+}
 void TentacleChain::applyWave(float time, float phase, float flex)
 {
     // THIS is the part that makes it look alive, not the solver above.

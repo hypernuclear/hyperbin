@@ -725,11 +725,16 @@ int main(int argc, char **argv)
             if (mb < reach)
                 return fail("the overlay is too short for a drip at full stretch");
         }
-        // An effect that cannot rest while it is visible has to at least
-        // ask to be animated slowly — it is the only lever left on cost.
-        if (o.preferredFrameIntervalMs() < 20)
-            return fail("ooze does not ask to be slowed");
-        std::printf("ooze asks for %dms frames\n", o.preferredFrameIntervalMs());
+        // This used to assert that the ooze asked to be run slowly, on the
+        // reasoning that an effect which cannot rest has no other lever on
+        // its cost. Both halves turned out to be wrong: NO effect here
+        // rests (every isAtRest() collapses to isEmpty()), so it was not a
+        // property of this one — and the per-effect cap was overriding the
+        // power policy rather than cooperating with it, so the gel ran at
+        // 30fps on a 120Hz display. Cadence is core/PowerPolicy's alone
+        // now, which is where the low-power decision already lives.
+        if (!o.isAtRest())
+            return fail("ooze should be at rest once it is empty");
     }
 
 

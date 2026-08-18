@@ -129,7 +129,11 @@ Window {
                                   ? Qt.application.arguments[
                                         Qt.application.arguments.indexOf("--full") + 1]
                                   : 0.85);
-                frameIntervalMs = 16;
+                // --interval <ms> pins the clock, so the cost of a given
+                // cadence can be measured instead of argued about.
+                const ii = Qt.application.arguments.indexOf("--interval");
+                frameIntervalMs = ii >= 0
+                    ? Number(Qt.application.arguments[ii + 1]) : 16;
             }
         }
 

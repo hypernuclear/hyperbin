@@ -214,28 +214,6 @@ void TrayMenu::build()
     m_enable->setCheckable(true);
     connect(m_enable, &QAction::toggled, m_settings, &Settings::setEnabled);
 
-    // --- low power -------------------------------------------------------
-    // Three states, not a checkbox. "On battery" was the old question and
-    // it was the wrong one: somebody on mains may want this calm, and
-    // somebody unplugged may not want it throttled. Auto is the default
-    // and follows the OS's own Low Power Mode / Battery Saver.
-    QMenu *lowPower = m_menu->addMenu(QStringLiteral("Low Power Mode"));
-    m_lowPowerGroup = new QActionGroup(this);
-    m_lowPowerGroup->setExclusive(true);
-    const struct { const char *label; Settings::LowPower m; } powers[] = {
-        {"Auto", Settings::LowPower::Auto},
-        {"On",   Settings::LowPower::On},
-        {"Off",  Settings::LowPower::Off},
-    };
-    for (const auto &e : powers) {
-        auto *a = lowPower->addAction(QString::fromLatin1(e.label));
-        a->setCheckable(true);
-        a->setData(int(e.m));
-        m_lowPowerGroup->addAction(a);
-    }
-    connect(m_lowPowerGroup, &QActionGroup::triggered, this, [this](QAction *a) {
-        m_settings->setLowPower(Settings::LowPower(a->data().toInt()));
-    });
     // --- effect ---------------------------------------------------------
     // Built from the effect registry rather than hard-coded, so adding an
     // effect is one entry in EffectRegistry.cpp and nothing here.
@@ -327,6 +305,28 @@ void TrayMenu::build()
     // settings group is conventionally found.
     m_menu->addSeparator();
 
+    // --- low power -------------------------------------------------------
+    // Three states, not a checkbox. "On battery" was the old question and
+    // it was the wrong one: somebody on mains may want this calm, and
+    // somebody unplugged may not want it throttled. Auto is the default
+    // and follows the OS's own Low Power Mode / Battery Saver.
+    QMenu *lowPower = m_menu->addMenu(QStringLiteral("Low Power Mode"));
+    m_lowPowerGroup = new QActionGroup(this);
+    m_lowPowerGroup->setExclusive(true);
+    const struct { const char *label; Settings::LowPower m; } powers[] = {
+        {"Auto", Settings::LowPower::Auto},
+        {"On",   Settings::LowPower::On},
+        {"Off",  Settings::LowPower::Off},
+    };
+    for (const auto &e : powers) {
+        auto *a = lowPower->addAction(QString::fromLatin1(e.label));
+        a->setCheckable(true);
+        a->setData(int(e.m));
+        m_lowPowerGroup->addAction(a);
+    }
+    connect(m_lowPowerGroup, &QActionGroup::triggered, this, [this](QAction *a) {
+        m_settings->setLowPower(Settings::LowPower(a->data().toInt()));
+    });
     // Open at login. Hidden entirely where we have no implementation,
     // rather than shown as a switch that does nothing.
     if (launchAtLogin::supported()) {

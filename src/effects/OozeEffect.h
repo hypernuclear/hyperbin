@@ -84,10 +84,6 @@ public:
 
     bool isEmpty() const override { return m_sim.isEmpty(); }
     bool isAtRest() const override { return m_sim.isAtRest(); }
-    int  preferredFrameIntervalMs() const override
-    {
-        return m_sim.preferredFrameIntervalMs();
-    }
 
     QMargins margins(qreal iconSize) const override;
     QUrl visualSource() const override;

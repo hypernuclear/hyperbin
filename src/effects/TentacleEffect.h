@@ -144,18 +144,6 @@ public:
 
     bool isEmpty() const override { return m_level <= 0.005f; }
     bool isAtRest() const override { return isEmpty(); }
-    /// NO OPINION — whatever the power policy says.
-    ///
-    /// This used to return 33, which does not mean "ask for 30fps": the
-    /// host takes qMax(policy, this), so an effect can only ever ask to be
-    /// drawn LESS often. The policy already runs 60fps on mains and halves
-    /// it on battery for everything, so 33 was quietly overriding that to
-    /// 30 on mains as well — and this effect whips, so a strike crossing
-    /// the bin in a fifth of a second was stepping rather than moving.
-    ///
-    /// Zero is the way to say "no floor", and it puts the mains/battery
-    /// decision back where it belongs, in core/PowerPolicy.
-    int preferredFrameIntervalMs() const override { return 0; }
 
     QMargins margins(qreal iconSize) const override;
     QUrl visualSource() const override;

@@ -64,12 +64,12 @@ public:
     bool isEmpty() const { return m_level <= 0.0005f; }
 
     /// Ooze drips for as long as there is anything to drip, so it only
-    /// rests once it is gone. What is done about the cost of that is in
-    /// preferredFrameIntervalMs() — an effect that cannot stop should at
-    /// least ask to be run slowly.
+    /// rests once it is gone — which is true of EVERY effect here, not just
+    /// this one, and is why none of them carries a private frame-rate cap
+    /// any more. This used to answer preferredFrameIntervalMs() with 33 and
+    /// so ran at 30fps whatever the display could do. See the note in
+    /// core/Effect.h.
     bool isAtRest() const { return isEmpty(); }
-
-    int preferredFrameIntervalMs() const { return params.frameIntervalMs; }
 
     /// How far a drip hangs, as a fraction of the icon — and the most
     /// the cycle ever stretches that. The margin below the bin is
@@ -118,7 +118,6 @@ public:
         /// This leaves at nothing, gathers pace, and settles in.
         float creepEase  = 3.4f;  // filling: about 1.4s
         float recedeEase = 5.0f;  // and draining: emptying is a relief
-        int   frameIntervalMs = 33;
     };
     Params params;
 

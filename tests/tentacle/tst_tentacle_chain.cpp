@@ -270,15 +270,36 @@ private slots:
     // alignment is most tempting and most wrong.
     void roll_armBanksAsOnePiece_data()
     {
-        QTest::addColumn<QVector3D>("dir");
-        QTest::newRow("sweep +x") << QVector3D(1, 0, 0);
-        QTest::newRow("sweep -x") << QVector3D(-1, 0, 0);
-        QTest::newRow("sweep +z") << QVector3D(0, 0, 1);
-        QTest::newRow("sweep -z") << QVector3D(0, 0, -1);
+        // Two floats rather than one QVector3D, and not for tidiness.
+        //
+        // A QTest column is stored by calling QMetaType(id).create() —
+        // a lookup by NUMERIC id, not by the compile-time type. QVector3D
+        // is a QtGui built-in, and in an appless test binary on Windows
+        // nothing has put QtGui's interface for that id into the registry
+        // by the time a _data() function runs. create() then returns
+        // null, the row's element is a null pointer, and QFETCH
+        // dereferences it: an access violation with no diagnostic, inside
+        // the test function, before its first line of real work.
+        //
+        // It cost a morning because every signpost pointed elsewhere: the
+        // rows enumerate correctly under -datatags, macOS passes (frame-
+        // works register their metatypes in a different order to DLLs),
+        // and the same solver loop lifted into a standalone binary runs
+        // clean at both -Od and -O2. Float columns are core types and
+        // marshal correctly, so the direction is carried as its
+        // components and rebuilt here.
+        QTest::addColumn<float>("dx");
+        QTest::addColumn<float>("dz");
+        QTest::newRow("sweep +x") <<  1.0f << 0.0f;
+        QTest::newRow("sweep -x") << -1.0f << 0.0f;
+        QTest::newRow("sweep +z") <<  0.0f << 1.0f;
+        QTest::newRow("sweep -z") <<  0.0f << -1.0f;
     }
     void roll_armBanksAsOnePiece()
     {
-        QFETCH(QVector3D, dir);
+        QFETCH(float, dx);
+        QFETCH(float, dz);
+        const QVector3D dir(dx, 0.0f, dz);
         TentacleChain c;
         c.reset(base(), emerge(), kLen);
         for (int f = 0; f < 400; ++f) {

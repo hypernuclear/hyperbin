@@ -103,7 +103,7 @@ public, so nothing here can live in the tree.
 
 ### Shared with the other products, or not
 
-Most of these describe *Hypernuclear* rather than *hyperbin*, and are
+Most of these describe *hypernuclear* rather than *hyperbin*, and are
 copied verbatim from any other repo that already releases. Three must
 not be.
 

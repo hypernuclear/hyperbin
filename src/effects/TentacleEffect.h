@@ -217,6 +217,7 @@ private:
         float strike;   ///< which way it lashes, radians, 0 = at the camera
         float swing;    ///< how far that direction wanders, radians
         float sink;     ///< extra root depth, fractions of the bin's height
+        float lean;     ///< how far it drifts sideways at REST, 0..1
     };
 
     /// A TRIANGLE, apex at the back — one arm behind two.
@@ -234,6 +235,29 @@ private:
     /// camera genuinely does not shrink with distance, so the far arm is
     /// scaled down by hand. Small — eight per cent — because the cue only
     /// has to nudge; overdone it reads as three different creatures.
+    ///
+    /// NOT SYMMETRIC, on purpose, and named by where they appear ON SCREEN
+    /// rather than by which way they face — "left" meaning the arm's own
+    /// left is how a whole round of tuning went into the wrong one.
+    ///
+    /// The leftmost arm is where it should be and is left alone at 0.62.
+    /// The rightmost sat too far out and comes in to 0.30, and the centre
+    /// one carries a small negative offset because it measured about 18px
+    /// right of the bin's axis rather than on it.
+    ///
+    /// Why symmetric seats did not produce a symmetric picture is not
+    /// fully explained: measured at the row where the arms emerge, the
+    /// left crossed at exactly its seat (-110) and the right 48px beyond
+    /// its own (+158). The frame seed is the one thing here that is not
+    /// mirrored — buildFrames starts from world +x for both arms — so the
+    /// wave rides a different frame on each side. That is the next place
+    /// to look if this drifts again. The three terms stack: a base at
+    /// 0.62 is 136px out on a 444px bin, the rest lean adds up to another
+    /// 98 before the clamp, and the arm's own radius is 53 on top of
+    /// whatever its centre line reaches. That put the outside edge at 251
+    /// against a bin that ends at 222. Cutting the seat and the lean pulls
+    /// the whole stack in rather than clamping the tip and leaving the
+    /// arm's body to bow out past it.
     ///
     /// Seated well inside the rim, not on it. The strike has to have
     /// somewhere to go: an arm rooted at 0.8 of the opening's half-width
@@ -267,10 +291,10 @@ private:
     /// one, and the back arm is a long way behind both.
     static constexpr Seat kSeats[kMaxTentacles] = {
         //  lateral  depth   size   strike  swing
-        //                                                      sink
-        {      0.00f, -0.30f, 0.92f,  1.45f, 1.15f,             0.10f },  // back, centre
-        {     -0.62f,  0.12f, 0.78f, -0.75f, 0.28f,             0.00f },  // front left
-        {      0.62f,  0.12f, 0.78f,  0.75f, 0.28f,             0.00f },  // front right
+        //                                                      sink   lean
+        {     -0.05f, -0.30f, 0.92f,  0.00f, 0.75f,             0.10f, 0.16f },  // centre
+        {     -0.62f,  0.12f, 0.78f, -0.75f, 0.28f,             0.00f, 1.00f },  // leftmost
+        {      0.30f,  0.12f, 0.78f,  0.75f, 0.28f,             0.00f, 0.55f },  // rightmost
     };
 
     /// An arm's length, as a fraction of the bin's height.

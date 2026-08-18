@@ -279,7 +279,8 @@ QVector3D TentacleEffect::armTarget(int i, float &flex, float &maxBend) const
         // clamped to 1.18 opening-radii, arms still overhung the artwork
         // by up to 219px on a 444px bin. The reach has to be smaller at
         // source, not corrected afterwards.
-        + out * (mouthRadius() * (0.36f + 0.16f * std::sin(m_time * 0.31f + sb * 6.28f)));
+        + out * (mouthRadius() * seat.lean
+                 * (0.36f + 0.16f * std::sin(m_time * 0.31f + sb * 6.28f)));
     // Where the pointer is, in scene units, and how much to care.
     //
     // CONTINUOUS, and that is the fix rather than a tuning: reaching used
@@ -450,7 +451,7 @@ QVector3D TentacleEffect::keepNear(const QVector3D &t) const
     // pair could finish nearly two opening-radii from the centre -- well
     // clear of the artwork, waving at nothing. Clamped, not scaled, so the
     // arms nearest the middle still get their full travel.
-    const float limit = mouthRadius() * 0.90f;
+    const float limit = mouthRadius() * 0.82f;
     const float r = std::hypot(t.x() - mouthX(), t.z());
     if (r <= limit || r < 1e-4f)
         return t;

@@ -75,16 +75,39 @@ jobs:
       - name: Work out the version
         shell: bash
         run: |
+          PROJECT="$(sed -n 's/^project(hyperbin VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)"
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
           else
-            VERSION="$(sed -n 's/^project(hyperbin VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)-pr${{ github.event.number }}"
+            VERSION="${PROJECT}-pr${{ github.event.number }}"
           fi
           BUILD=$(git rev-list --count HEAD)
-          echo "VERSION=$VERSION"   >> $GITHUB_ENV
-          echo "BUILD=$BUILD"       >> $GITHUB_ENV
+
+          # MSIX gets its own version, and it has to be built rather than
+          # borrowed. Its schema takes four dot-separated integers and
+          # NOTHING else, so the display version cannot be used: that is
+          # only ever clean on a tag, and every pull request packed as
+          # "1.0.0-pr4.0" and failed makeappx outright.
+          #
+          # The last field is the commit count for the same reason
+          # CFBundleVersion is — see CMakeLists. Windows compares these to
+          # decide what is an upgrade, so two builds of 1.0.0 that both
+          # said 1.0.0.0 would be indistinguishable to it. A commit count
+          # only ever goes up.
+          #
+          # Strip any pre-release suffix off a tag first: v1.1.0-beta.2 is
+          # a perfectly good tag and not a number.
+          MSIX_VERSION="${VERSION%%-*}.${BUILD}"
+          if [[ "$BUILD" -gt 65535 ]]; then
+            echo "::error::commit count $BUILD exceeds the 65535 an MSIX version field allows"
+            exit 1
+          fi
+
+          echo "VERSION=$VERSION"           >> $GITHUB_ENV
+          echo "BUILD=$BUILD"               >> $GITHUB_ENV
+          echo "MSIX_VERSION=$MSIX_VERSION" >> $GITHUB_ENV
           echo "$VERSION" > build-version.txt
-          echo "Version $VERSION, build $BUILD"
+          echo "Version $VERSION, build $BUILD, msix $MSIX_VERSION"
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
@@ -219,8 +242,11 @@ jobs:
           Copy-Item packaging\windows\Assets dist\windows\Assets -Recurse -Force
 
           (Get-Content dist\windows\AppxManifest.xml) `
-            -replace '\{\{VERSION\}\}', "$env:VERSION" `
+            -replace '\{\{MSIX_VERSION\}\}', "$env:MSIX_VERSION" `
             -replace '\{\{ARCH\}\}', 'x64' | Set-Content dist\windows\AppxManifest.xml
+          if (Select-String -Path dist\windows\AppxManifest.xml -Pattern '\{\{') {
+            throw "AppxManifest still has an unsubstituted placeholder"
+          }
 
           $makeappx = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\10.*\x64\makeappx.exe" |
                       Sort-Object -Descending | Select-Object -First 1
@@ -346,9 +372,24 @@ jobs:
           # reads a whole directory and emits one <item> per archive; it
           # has no notion of architecture, so the two are produced apart
           # and the sparkle:cpu attribute is added on the way in.
+          # Located with find, never by a constructed path.
+          #
+          # upload-artifact@v4 roots an artifact at the least common
+          # ancestor of everything it matched. This job's upload lists
+          # both `build/*.zip` and `build-version.txt`, so that ancestor
+          # is the workspace and the files arrive under
+          # artifacts/<name>/build/… — not artifacts/<name>/. Building the
+          # path by hand assumed otherwise and failed here after all three
+          # platforms had signed and notarized.
           for ARCH in arm64 x64; do
             mkdir -p "feed-$ARCH"
-            cp artifacts/hyperbin-macos-$ARCH/hyperbin-${VERSION}-macos-${ARCH}.zip "feed-$ARCH/"
+            ZIP=$(find artifacts -type f -name "hyperbin-*-macos-${ARCH}.zip" | head -1)
+            if [ -z "$ZIP" ]; then
+              echo "::error::no macOS ${ARCH} zip in the artifacts"
+              find artifacts -type f | sed 's/^/  /'
+              exit 1
+            fi
+            cp "$ZIP" "feed-$ARCH/"
             ./sparkle/bin/generate_appcast --ed-key-file "$KEY" \
               --download-url-prefix "${CDN_URL}/releases/${VERSION}/" \
               "feed-$ARCH/"
@@ -391,8 +432,15 @@ jobs:
 
       - name: Build the Windows appcast
         run: |
-          EXE="artifacts/hyperbin-windows-x64/hyperbin-${VERSION}-windows-x64.exe"
-          SIG=$(cat artifacts/hyperbin-windows-x64/eddsa-signature.txt)
+          # find, not a constructed path — see the macOS appcast step.
+          EXE=$(find artifacts -type f -name "hyperbin-*-windows-x64.exe" | head -1)
+          SIGFILE=$(find artifacts -type f -name "eddsa-signature.txt" | head -1)
+          if [ -z "$EXE" ] || [ -z "$SIGFILE" ]; then
+            echo "::error::missing Windows installer or its EdDSA signature"
+            find artifacts -type f | sed 's/^/  /'
+            exit 1
+          fi
+          SIG=$(cat "$SIGFILE")
           LEN=$(stat -f%z "$EXE")
           BUILD=$(git rev-list --count "$GITHUB_REF_NAME")
           # sparkle:version is the build number WinSparkle compares;

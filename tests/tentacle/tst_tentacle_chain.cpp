@@ -255,6 +255,63 @@ private slots:
                  "a rolling tentacle lurches between frames");
     }
 
+    // The arm banks as ONE PIECE — it does not wind up along its length.
+    //
+    // The bank is a single angle laid on the seed, and transport carries
+    // it to every joint unchanged, so the twist between neighbouring
+    // frames is zero by construction. That is worth a test because the
+    // obvious-looking alternative is not: an earlier version rolled every
+    // joint onto its OWN bend plane, and since neighbouring joints curl in
+    // slightly different planes, each got a slightly different roll and
+    // the mesh wound along its length. Verified at 201 degrees of twist
+    // from base to tip — an arm being wrung out rather than turning.
+    //
+    // Run with the wave on, because that is the case where per-joint
+    // alignment is most tempting and most wrong.
+    void roll_armBanksAsOnePiece_data()
+    {
+        QTest::addColumn<QVector3D>("dir");
+        QTest::newRow("sweep +x") << QVector3D(1, 0, 0);
+        QTest::newRow("sweep -x") << QVector3D(-1, 0, 0);
+        QTest::newRow("sweep +z") << QVector3D(0, 0, 1);
+        QTest::newRow("sweep -z") << QVector3D(0, 0, -1);
+    }
+    void roll_armBanksAsOnePiece()
+    {
+        QFETCH(QVector3D, dir);
+        TentacleChain c;
+        c.reset(base(), emerge(), kLen);
+        for (int f = 0; f < 400; ++f) {
+            const float u = ease(f / 200.0f);
+            const QVector3D tgt = base()
+                + QVector3D(0, 1, 0) * (kLen * (0.85f - 0.45f * u))
+                + dir * (kLen * 0.55f * u);
+            c.solve(base(), emerge(), tgt, float(f) * 0.016f, 1.0f, 0.3f,
+                    TentacleChain::kCoilBend);
+            c.settle(base(), emerge(), TentacleChain::kCoilBend);
+        }
+        float twist = 0.0f;
+        for (int i = 2; i < kN; ++i) {
+            const QVector3D t = (c.joints()[i] - c.joints()[i - 1]).normalized();
+            QVector3D a = c.sides()[i - 1]
+                        - t * QVector3D::dotProduct(c.sides()[i - 1], t);
+            if (a.lengthSquared() < 1e-8f)
+                continue;
+            a.normalize();
+            const QVector3D b = c.sides()[i];
+            const float cs = std::clamp(QVector3D::dotProduct(a, b), -1.0f, 1.0f);
+            const float sn = QVector3D::dotProduct(QVector3D::crossProduct(a, b), t);
+            twist += std::abs(std::atan2(sn, cs));
+        }
+        const float deg = twist * 180.0f / 3.14159265f;
+        qInfo("total twist along the arm: %.1f degrees; bank %.1f",
+              double(deg), double(c.roll() * 180.0f / 3.14159265f));
+        QVERIFY2(deg < 5.0f, "the arm winds up along its length instead of banking");
+        // ...and the bank stays inside its stop, which is what stops the
+        // suckers ever travelling round to the back.
+        QVERIFY2(std::abs(c.roll()) <= TentacleChain::kRollLimit + 1e-3f,
+                 "the bank exceeded its limit");
+    }
     // The wave does not speed up the longer it runs, and does not chatter.
     //
     // The undulation's pace wanders so it does not read as a machine, and

@@ -763,8 +763,9 @@ void TentacleEffect::updateArms()
                 // twice as bad when its per-frame rate had in fact more
                 // than halved.
                 if (Q_UNLIKELY(qEnvironmentVariableIsSet("HYPERBIN_TRACE")))
-                    qInfo("F %d %d %.3f %.2f", i, int(m_state[i].move),
-                          double(moveProgress(i)), double(worst));
+                    qInfo("F %d %d %.3f %.2f bank %.2f", i, int(m_state[i].move),
+                          double(moveProgress(i)), double(worst),
+                          double(m_chain[i].roll() * 180.0f / 3.14159265f));
             }
             for (int j = 0; j < TentacleChain::kJoints; ++j)
                 m_lastJoints[i][j] = m_chain[i].joints()[j];

@@ -37,11 +37,22 @@ void TentacleChain::solve(const QVector3D &base, const QVector3D &emerge,
     // redundant: the wave displaces joints off the chain, which stretches
     // every segment it touches, and without a second constraint pass the
     // arm visibly lengthens and shortens as the wave runs down it.
+    // Real seconds, from the clock the caller already passes. Clamped
+    // because the first frame has no previous time and a stall must not
+    // let the bank jump.
+    const float dt = m_prevTime < 0.0f ? 0.016f
+                                       : std::clamp(time - m_prevTime, 0.0f, 0.1f);
+    m_prevTime = time;
     for (int i = 0; i < kJoints; ++i)
         m_was[i] = m_p[i];
     fabrik(base, target);
     constrain(base, maxBend);
     holdRoot(base, emerge);
+    // Once a frame, before anything reads the frames. buildFrames runs
+    // three times over a step — twice here and again from settle — so
+    // updating the bank inside it would apply the rate limit three times
+    // and make the speed depend on how often the frames are rebuilt.
+    updateRoll(dt);
     // FRAMES BEFORE THE WAVE, and this is not tidiness — it is what stops
     // the arm shaking.
     //
@@ -345,6 +356,50 @@ void TentacleChain::applyWave(float time, float phase, float flex)
     }
 }
 
+namespace {
+/// Rotate v about axis by ang, for v perpendicular to axis — Rodrigues
+/// without its parallel term.
+QVector3D bankBy(const QVector3D &v, const QVector3D &axis, float ang)
+{
+    return v * std::cos(ang) + QVector3D::crossProduct(axis, v) * std::sin(ang);
+}
+} // namespace
+void TentacleChain::updateRoll(float dt)
+{
+    // A BANK, in response to movement. Nothing is aimed at anything.
+    //
+    // Three earlier versions tried to point the frame somewhere — at the
+    // inside of the curl, then at world down — and all of them failed the
+    // same way. An aim is a property of the POSE: it jumps when the pose
+    // wobbles, and it inverts outright when a bend passes through
+    // straight, which is what made the suckers flip over. Worse, the frame
+    // is also carried by transport, so bounding the correction bounded
+    // nothing and the roll went round anyway.
+    //
+    // This asks a smaller question with a bounded answer: which way is the
+    // arm sweeping, and lean into it, a little. Like a fish banking into a
+    // turn. The frame underneath is untouched — the stable one that
+    // shipped — and the whole chain turns together on top of it.
+    const int j = kJoints * 2 / 3;
+    const QVector3D tj = dir(m_p[j] - m_p[j - 1], QVector3D(0, 1, 0));
+    // The outer half's travel this frame. The root is held and barely
+    // moves, so including it only dilutes the direction with noise.
+    QVector3D moved;
+    for (int i = kJoints / 2; i < kJoints; ++i)
+        moved += m_p[i] - m_was[i];
+    m_travel += (moved - m_travel) * std::min(1.0f, dt * 6.0f);
+    // How much of that travel is ACROSS the arm, along the frame's own
+    // side axis — which is the direction a bank would show in. Measured
+    // in segment lengths so it means the same on any size of bin.
+    const QVector3D side = m_side[j] - tj * QVector3D::dotProduct(m_side[j], tj);
+    float bank = 0.0f;
+    if (side.lengthSquared() > 1e-6f && m_seg > 0.0f)
+        bank = QVector3D::dotProduct(m_travel, side.normalized()) / m_seg;
+    const float want = std::clamp(bank * kRollGain, -kRollLimit, kRollLimit);
+    // Rate limited, so the arm is seen to roll rather than found rolled.
+    m_roll += std::clamp(want - m_roll, -kRollRate * dt, kRollRate * dt);
+    m_roll = std::clamp(m_roll, -kRollLimit, kRollLimit);
+}
 void TentacleChain::buildFrames()
 {
     // Rotation-minimising, by projection: carry the previous joint's side
@@ -356,7 +411,11 @@ void TentacleChain::buildFrames()
     QVector3D s = QVector3D::crossProduct(t0, QVector3D(0, 0, 1));
     if (s.lengthSquared() < 1e-6f)
         s = QVector3D::crossProduct(t0, QVector3D(1, 0, 0));
-    m_side[0] = s.normalized();
+    // The bank, laid on the seed. Transport carries it unchanged to every
+    // joint, so one angle turns the entire arm and no two rings can
+    // disagree — which is the difference between the arm rotating and the
+    // mesh winding up along its length.
+    m_side[0] = bankBy(s.normalized(), t0, m_roll);
 
     for (int i = 1; i < kJoints; ++i) {
         const QVector3D t = dir(m_p[i] - m_p[i - 1], t0);

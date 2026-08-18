@@ -61,6 +61,30 @@ public:
     /// opening — the part that physically could not swing.
     static constexpr int kRootHeld = 4;
 
+    /// How far the whole arm may roll about its own axis, radians.
+    ///
+    /// A BANK, not a solve. The frame underneath is left exactly as it
+    /// was — transported from a fixed seed, which is stable and is what
+    /// shipped — and this turns the entire arm on top of it by one small
+    /// angle. Every ring turns together, so it reads as the arm rotating
+    /// rather than the mesh being wrung out, and it cannot do anything
+    /// surprising because a scalar cannot leave its own clamp.
+    ///
+    /// Small on purpose. Earlier attempts aimed the frame at a direction —
+    /// the inside of the curl, then world down — and both failed the same
+    /// way: the aim is a property of the pose, so it jumps when the pose
+    /// does and inverts outright when a bend passes through straight. That
+    /// is the reversing. Nothing here is aimed at anything, so there is
+    /// nothing to invert.
+    static constexpr float kRollLimit = 0.42f;   // 24 degrees, see above
+    /// How fast it may roll, radians a second: the full swing takes about
+    /// two thirds of a second, so it is seen to happen.
+    static constexpr float kRollRate = 1.3f;
+    /// How much bank a segment-length of sideways travel per frame asks
+    /// for, radians. Tuned so an ordinary sweep uses most of the range and
+    /// a lash reaches the stop.
+    static constexpr float kRollGain = 0.55f;
+
 
     /// Straighten the arm out from `base` along `dir`, `length` long.
     /// Called once, and again if the bin resizes — never per frame, or the
@@ -123,6 +147,11 @@ public:
     /// side, so an unstable frame does not merely wobble the shading, it
     /// rolls the suckers round the arm.
     const QVector3D *sides() const { return m_side; }
+    /// The arm's bank about its own axis, radians. Exposed for the trace:
+    /// it IS the rotation this class adds, so measuring it needs no world
+    /// reference — which the earlier attempts did, and which is what made
+    /// them impossible to judge.
+    float roll() const { return m_roll; }
 
 private:
     void fabrik(const QVector3D &base, const QVector3D &target);
@@ -130,6 +159,7 @@ private:
     void limitBend(float maxBend);
     void holdRoot(const QVector3D &base, const QVector3D &emerge);
     void applyWave(float time, float phase, float flex);
+    void updateRoll(float dt);
     void buildFrames();
 
 
@@ -181,6 +211,17 @@ private:
     /// the roll begins and carried, the spiral is stable whatever the
     /// solver does underneath it.
     QVector3D m_curlAxis;
+    /// The arm's bank, radians, laid on the whole chain at once. See
+    /// updateRoll — the only thing that moves it — and buildFrames, which
+    /// applies it to the seed and lets transport carry it to every joint.
+    float m_roll = 0.0f;
+    /// Where the outer half has been going, smoothed. The bank follows
+    /// this rather than the pose: a shape can inch across the point where
+    /// its bend inverts, a direction of travel cannot.
+    QVector3D m_travel;
+    /// The clock the last solve was given, for a real dt. Negative until
+    /// the first one arrives.
+    float m_prevTime = -1.0f;
     bool m_curling = false;
     float m_seg = 0.0f;
 };

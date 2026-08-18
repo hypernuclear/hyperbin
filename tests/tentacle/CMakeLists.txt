@@ -13,6 +13,8 @@ add_test(NAME Tentacle.rootHoldArmLeavesAlongTheHole
          COMMAND tst_tentacle_chain rootHold_armLeavesAlongTheHole)
 add_test(NAME Tentacle.rollDoesNotLurch
          COMMAND tst_tentacle_chain roll_doesNotLurch)
+add_test(NAME Tentacle.rollArmBanksAsOnePiece
+         COMMAND tst_tentacle_chain roll_armBanksAsOnePiece)
 add_test(NAME Tentacle.waveDoesNotAccelerateOrChatter
          COMMAND tst_tentacle_chain wave_doesNotAccelerateOrChatter)
 add_test(NAME Tentacle.settlingStillArmGoesStill

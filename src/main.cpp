@@ -217,6 +217,18 @@ int main(int argc, char **argv)
         // conclusions.
         const QString shot = qEnvironmentVariable("HYPERBIN_PREVIEW_SHOT");
         if (!shot.isEmpty()) {
+            // Out of the way. A grab-and-exit run needs the window
+            // rendered, not focused, and this harness gets run dozens of
+            // times in a row while somebody is working in another app —
+            // left alone it steals focus and stacks on top every single
+            // time. Qt's own flags are not enough on macOS, where
+            // activation belongs to the application rather than the
+            // window, so the native side does the rest.
+            win->setFlags(win->flags() | Qt::WindowDoesNotAcceptFocus
+                          | Qt::WindowStaysOnBottomHint);
+#if defined(Q_OS_MACOS)
+            configurePreviewWindow(win);
+#endif
             // HYPERBIN_PREVIEW_SHOT_MS moves the grab in time. Two grabs
             // at different moments is the only way to tell an animation
             // that is running from one that is merely present in the

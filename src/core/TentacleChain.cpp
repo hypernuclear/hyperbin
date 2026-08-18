@@ -1,0 +1,188 @@
+#include "TentacleChain.h"
+
+#include <cmath>
+
+namespace hyperbin {
+namespace {
+
+/// Normalise, or fall back — a zero-length segment happens the moment two
+/// joints coincide, which FABRIK can do transiently when the target sits
+/// exactly on a joint.
+QVector3D dir(const QVector3D &v, const QVector3D &fallback)
+{
+    const float l = v.length();
+    return l > 1e-5f ? v / l : fallback;
+}
+
+} // namespace
+
+void TentacleChain::reset(const QVector3D &base, const QVector3D &d, float length)
+{
+    m_seg = length / float(kJoints - 1);
+    const QVector3D u = dir(d, QVector3D(0, 1, 0));
+    for (int i = 0; i < kJoints; ++i)
+        m_p[i] = base + u * (m_seg * float(i));
+    buildFrames();
+}
+
+void TentacleChain::solve(const QVector3D &base, const QVector3D &target,
+                          float time, float phase, float flex, float maxBend)
+{
+    if (!valid())
+        return;
+
+    // The showcase's four stages, in its order. The last one is not
+    // redundant: the wave displaces joints off the chain, which stretches
+    // every segment it touches, and without a second constraint pass the
+    // arm visibly lengthens and shortens as the wave runs down it.
+    fabrik(base, target);
+    constrain(base, maxBend);
+    applyWave(time, phase, flex);
+    constrain(base, maxBend);
+    buildFrames();
+}
+
+void TentacleChain::fabrik(const QVector3D &base, const QVector3D &target)
+{
+    for (int it = 0; it < kSolveIterations; ++it) {
+        // Backward: put the tip on the target and walk down, each joint
+        // pulled to a segment's distance from the one above it. The base
+        // ends up wherever it ends up.
+        m_p[kJoints - 1] = target;
+        for (int i = kJoints - 2; i >= 0; --i)
+            m_p[i] = m_p[i + 1]
+                   + dir(m_p[i] - m_p[i + 1], QVector3D(0, -1, 0)) * m_seg;
+
+        // Forward: put the base back where it belongs and walk up. The tip
+        // now falls short of the target by however far it was out of
+        // reach, which is the correct answer and needs no special case —
+        // an arm asked for something beyond its length simply points at it.
+        m_p[0] = base;
+        for (int i = 1; i < kJoints; ++i)
+            m_p[i] = m_p[i - 1]
+                   + dir(m_p[i] - m_p[i - 1], QVector3D(0, 1, 0)) * m_seg;
+    }
+}
+
+void TentacleChain::constrain(const QVector3D &base, float maxBend)
+{
+    // Bilateral: where a segment is the wrong length, both of its ends
+    // move half the error towards fixing it, and the correction ripples
+    // outward over the iterations. Moving only the outer joint instead
+    // pushes every error to the tip, where it accumulates into a visible
+    // flick.
+    for (int it = 0; it < kConstraintIterations; ++it) {
+        m_p[0] = base;
+        for (int i = 0; i < kJoints - 1; ++i) {
+            const QVector3D d = m_p[i + 1] - m_p[i];
+            const float len = d.length();
+            if (len < 1e-5f)
+                continue;
+            const QVector3D fix = d * ((len - m_seg) / len * 0.5f);
+            // The base is an anchor, so when it is one end of the segment
+            // the other end takes the whole correction.
+            if (i == 0) {
+                m_p[i + 1] -= fix * 2.0f;
+            } else {
+                m_p[i] += fix;
+                m_p[i + 1] -= fix;
+            }
+        }
+        // Interleaved with the lengths rather than run once afterwards.
+        // Each fights the other — straightening a kink stretches the
+        // segments it moved, and fixing a length re-bends the joint — so
+        // they have to converge together. Ten passes of both settles.
+        limitBend(maxBend);
+    }
+    m_p[0] = base;
+}
+
+void TentacleChain::limitBend(float maxBend)
+{
+    QVector3D prev = dir(m_p[1] - m_p[0], QVector3D(0, 1, 0));
+    for (int i = 1; i < kJoints - 1; ++i) {
+        QVector3D cur = dir(m_p[i + 1] - m_p[i], prev);
+        const float c = std::clamp(QVector3D::dotProduct(prev, cur), -1.0f, 1.0f);
+        if (std::acos(c) > maxBend) {
+            // Swung back to the limit in the plane the two segments
+            // already share, so the joint bends less rather than
+            // somewhere else. Built from the component of `cur` across
+            // `prev`, which is that plane's second axis; if there is none
+            // the two are collinear and there was nothing to fix.
+            QVector3D perp = cur - prev * c;
+            if (perp.lengthSquared() > 1e-10f) {
+                perp.normalize();
+                cur = prev * std::cos(maxBend) + perp * std::sin(maxBend);
+            } else {
+                cur = prev;
+            }
+            m_p[i + 1] = m_p[i] + cur * m_seg;
+        }
+        prev = cur;
+    }
+}
+
+void TentacleChain::applyWave(float time, float phase, float flex)
+{
+    // THIS is the part that makes it look alive, not the solver above.
+    //
+    // A sine laid across the chain, its phase advancing with distance
+    // along the arm, so the crest travels from base to tip rather than the
+    // whole arm flapping in step. Amplitude is deliberately NOT tapered —
+    // the showcase leaves it constant, and tapering it to nothing at the
+    // tip removes the motion from the one part of the arm that has the
+    // freedom to show it.
+    //
+    // Two waves, not one. The showcase is 2D and has only a single axis to
+    // displace along; in three dimensions a lone wave is a flat flap seen
+    // edge-on half the time. The second runs across the first at a rate
+    // that does not divide into it, which turns the flap into a slow
+    // helical roll that never repeats.
+    constexpr float kFrequency = 2.0f;
+    constexpr float kSpeed = 3.0f;
+    constexpr float kAmplitude = 0.055f;   // of the arm's own length
+    const float amp = kAmplitude * length() * flex;
+    if (amp <= 0.0f)
+        return;
+
+    for (int i = 1; i < kJoints; ++i) {
+        const float s = float(i) / float(kJoints - 1);
+        const QVector3D t = dir(m_p[i] - m_p[i - 1], QVector3D(0, 1, 0));
+        const QVector3D side = dir(m_side[i] - t * QVector3D::dotProduct(m_side[i], t),
+                                   QVector3D(1, 0, 0));
+        const QVector3D up = QVector3D::crossProduct(t, side);
+
+        const float a = time * kSpeed + phase + s * kFrequency * 6.28318531f;
+        const float b = time * kSpeed * 0.61f + phase * 1.7f
+                      + s * kFrequency * 4.10318531f;
+        // Held at the root. A wave that displaces the first joints pulls
+        // the arm out of the hole it is supposed to be coming through.
+        const float grip = s * s;
+        m_p[i] += side * (std::sin(a) * amp * grip)
+                + up   * (std::sin(b) * amp * 0.6f * grip);
+    }
+}
+
+void TentacleChain::buildFrames()
+{
+    // Rotation-minimising, by projection: carry the previous joint's side
+    // vector forward and take out whatever component the new tangent has
+    // acquired. Rebuilding each frame from a fixed world axis instead
+    // makes the frame spin wherever the arm passes near that axis, which
+    // on this model rolls the sucker row round to the far side.
+    QVector3D t0 = dir(m_p[1] - m_p[0], QVector3D(0, 1, 0));
+    QVector3D s = QVector3D::crossProduct(t0, QVector3D(0, 0, 1));
+    if (s.lengthSquared() < 1e-6f)
+        s = QVector3D::crossProduct(t0, QVector3D(1, 0, 0));
+    m_side[0] = s.normalized();
+
+    for (int i = 1; i < kJoints; ++i) {
+        const QVector3D t = dir(m_p[i] - m_p[i - 1], t0);
+        QVector3D carried = m_side[i - 1]
+                          - t * QVector3D::dotProduct(m_side[i - 1], t);
+        m_side[i] = dir(carried, m_side[i - 1]);
+        t0 = t;
+    }
+}
+
+} // namespace hyperbin

@@ -1,20 +1,21 @@
 // Tentacles reaching out of the bin.
 //
-// PLACEHOLDER GEOMETRY, on purpose. What is being built here first is the
-// occlusion, not the creature: something coming out of the bin has to
-// pass BEHIND its front wall on the way, and until that reads correctly
-// there is no point modelling anything. The tentacles are chains of
-// tapering spheres, and they are meant to be replaced.
+// Three arms seated as a triangle in the measured opening. Each is a joint
+// chain solved by FABRIK — core/TentacleChain — rather than the circular
+// arc this used to bend, which is the difference between an arm that has a
+// shape and one that has an angle.
 //
-// The masking is the interesting part, and it needs no depth proxy and no
-// model of the bin. A tentacle fragment is thrown away where it falls
-// below the mouth's near lip and over solid artwork — see
-// shaders/tentacle.frag, which also records the version that did this by
-// repainting the bin over the top instead, and why cutting our own
-// geometry is the better side of the join to work on.
+// The masking is the other half, and it needs no depth proxy and no model
+// of the bin. A fragment is thrown away where it falls below the mouth's
+// near lip with the bin's body between it and the eye, or behind the
+// rubbish filling the opening — see shaders/tentacle.frag, which also
+// records the version that did this by repainting the bin over the top
+// instead, and why cutting our own geometry is the better side of the join
+// to work on.
 #pragma once
 
 #include "../core/Effect.h"
+#include "../core/TentacleChain.h"
 
 #include <QImage>
 #include <QSizeF>
@@ -25,6 +26,7 @@
 namespace hyperbin {
 
 class IconTexture;
+class SpineTexture;
 
 class TentacleEffect : public Effect
 {
@@ -62,25 +64,36 @@ class TentacleEffect : public Effect
     Q_PROPERTY(float mouthHalfWidth READ mouthHalfWidth NOTIFY shapeChanged)
     Q_PROPERTY(float mouthDepthFraction READ mouthDepthFraction NOTIFY shapeChanged)
     Q_PROPERTY(bool mouthMeasured READ mouthMeasured NOTIFY shapeChanged)
-    /// One entry per arm that is out: (curl, curlDirection, 0, 0).
+    /// Every arm's SOLVED CHAIN, as texture data. Two rows per arm: joint
+    /// positions in scene units, then the frame across the arm.
     ///
-    /// curl      how far it bends over its whole length, radians
-    /// curlDir   which way that bend leans, radians in the scene
-    ///
-    /// Handed straight to the arm's vertex shader. Kept here rather than
-    /// in QML because the slap is a simulation with a clock and a cycle,
-    /// and everything of that kind in this app lives in step().
-    Q_PROPERTY(QVariantList arms READ arms NOTIFY frameChanged)
+    /// This replaced a pair of angles describing a circular arc. An arc is
+    /// two numbers for a whole arm and has constant curvature by
+    /// definition, which is precisely why the old motion read as stiff —
+    /// see core/TentacleChain, which also records where the technique
+    /// comes from and what in it actually does the work.
+    Q_PROPERTY(QObject *spineTexture READ spineTexture NOTIFY shapeChanged)
+    /// Joints per arm, so the shader knows the texture's width without
+    /// being told twice.
+    Q_PROPERTY(int jointCount READ jointCount CONSTANT)
 
     /// Where each arm SITS, as (lateral, depth, size, 0). Constant.
     ///
-    /// lateral   across the opening, as a fraction of its half-width
-    /// depth     into the opening: -1 at the far lip, +1 at the near one
-    /// size      a scale for the whole arm — see kSeats
-    ///
-    /// Fractions rather than scene units because the conversion from the
-    /// second one needs the camera's tilt, and the camera lives in QML.
+    /// Only `size` is still read by the scene, for the cross-section: the
+    /// other two are now consumed here, because with a chain the arm's
+    /// whole shape is solved in scene units and the model no longer
+    /// carries a transform of its own.
     Q_PROPERTY(QVariantList seats READ seats CONSTANT)
+
+    /// The scene camera's downward tilt, degrees. WRITTEN BY THE SCENE.
+    ///
+    /// Needed here because the opening is measured on screen and the
+    /// chains are solved in the scene: turning the mouth's on-screen
+    /// half-height into a reach in z divides by the sine of this. Pushed
+    /// in rather than duplicated as a constant, so there is one camera
+    /// tilt in the app and not two that can drift apart.
+    Q_PROPERTY(float cameraTilt READ cameraTilt WRITE setCameraTilt
+                   NOTIFY shapeChanged)
 
     /// How long an arm is, in scene units. Derived from the bin, because
     /// what an arm has to be able to do is reach over the rim and down
@@ -99,6 +112,22 @@ class TentacleEffect : public Effect
     /// How high an arm's root sits, scene units. Below the opening: it is
     /// meant to be buried in the rubbish.
     Q_PROPERTY(float rootY READ rootY NOTIFY shapeChanged)
+    /// The opening's reach into the scene along z, scene units.
+    ///
+    /// The measurement is the on-screen half-height of what is really a
+    /// circle, so recovering the circle divides by the sine of the
+    /// camera's tilt. Exposed rather than recomputed in QML: it was, and
+    /// when the delegate that owned the tilt was rewritten the expression
+    /// silently became NaN, which turned every occlusion test false and
+    /// let arms draw straight through the bin.
+    Q_PROPERTY(float mouthReachZ READ mouthReachZ NOTIFY shapeChanged)
+    /// How the bin's body narrows below the lip, as shares of the opening
+    /// at the rim and near the foot. Owned here and pushed to the shader
+    /// rather than written down in both places: the mask compares an arm
+    /// against this profile and the strike AIMS at it, and the two
+    /// disagreeing puts a tip through the wall it was supposed to land on.
+    Q_PROPERTY(float bodyTaperTop READ bodyTaperTop CONSTANT)
+    Q_PROPERTY(float bodyTaperFoot READ bodyTaperFoot CONSTANT)
 
 public:
     explicit TentacleEffect(QObject *parent = nullptr);
@@ -131,13 +160,21 @@ public:
     float level() const { return m_level; }
     int count() const;
     int maxTentacles() const { return kMaxTentacles; }
-    QVariantList arms() const { return m_arms; }
     QVariantList seats() const;
     float armLength() const;
+    QObject *spineTexture() const;
+    int jointCount() const { return TentacleChain::kJoints; }
+    float cameraTilt() const { return m_cameraTilt; }
+    void setCameraTilt(float degrees);
     QSizeF binSize() const { return m_binSize; }
     QRectF binRect() const { return m_binRect; }
     QObject *iconTexture() const;
 
+    float mouthReachZ() const;
+    float bodyTaperTop() const { return kBodyTop; }
+    float bodyTaperFoot() const { return kBodyFoot; }
+    /// The bin's half-width at a given scene height, in scene units.
+    float binHalfWidthAt(float y) const;
     float heapTopY() const;
     float heapFloorY() const;
     float rootY() const;
@@ -209,11 +246,18 @@ private:
     /// rather than landing on it. Forward of it, the arm clears the front
     /// wall and is drawn over the bin's face, which is the only way a slap
     /// can show contact with anything.
+    /// The front pair sit JUST BEHIND the near lip, not forward of it.
+    /// At 0.40 of the way toward the camera their roots cleared the rim
+    /// and they read as standing in front of the bin; at 0.12 the lip
+    /// crosses in front of the base and they look seated in the opening,
+    /// which is what an arm coming out of a hole should look like. They
+    /// are still a triangle — the separation that matters is the lateral
+    /// one, and the back arm is a long way behind both.
     static constexpr Seat kSeats[kMaxTentacles] = {
         //  lateral  depth   size   strike  swing
         {      0.00f, -0.80f, 0.92f,  1.45f, 1.15f },  // back, centre
-        {     -0.62f,  0.40f, 1.06f, -0.75f, 0.28f },  // front left
-        {      0.62f,  0.40f, 1.06f,  0.75f, 0.28f },  // front right
+        {     -0.62f,  0.12f, 1.06f, -0.75f, 0.28f },  // front left
+        {      0.62f,  0.12f, 1.06f,  0.75f, 0.28f },  // front right
     };
 
     /// An arm's length, as a fraction of the bin's height.
@@ -231,7 +275,7 @@ private:
     /// nothing left over to come down it. Slack curls looked like a
     /// gesture at the bin rather than a hit on it, and no amount of tuning
     /// the ANGLE could have fixed a length that was short.
-    static constexpr float kArmLength = 1.15f;
+    static constexpr float kArmLength = 1.22f;
 
     /// Where a strike aims, as a share of the opening's half-width.
     ///
@@ -240,6 +284,11 @@ private:
     /// opening at the lip and 0.93 a quarter of the way down, which is
     /// where the tip of a 4.4-radian curl arrives.
     static constexpr float kStrikeTarget = 0.94f;
+    /// The body's width as a share of the opening, at the lip and near the
+    /// foot. Measured on the macOS trash: 0.98 at the lip, 0.93 a quarter
+    /// down, 0.78 at four fifths.
+    static constexpr float kBodyTop = 0.98f;
+    static constexpr float kBodyFoot = 0.78f;
 
     /// How high the rubbish stands above the opening, and how far below it
     /// stays solid. Both fractions of the bin's height.
@@ -256,7 +305,13 @@ private:
     /// artwork says how deep the rubbish goes. It only has to be deeper
     /// than an arm's root, so that a root reads as buried in the rubbish
     /// instead of sitting on it.
-    static constexpr float kHeapRise = 0.107f;
+    /// Lowered from the measured peak of 0.107. That figure is the
+    /// NEWSPAPER — the single highest thing in the artwork — and using it
+    /// made the mound as tall as its tallest point everywhere, so the back
+    /// arm stayed hidden until it had climbed clear of all the rubbish and
+    /// then appeared above the lot. Half of it puts the arm among the
+    /// rubbish instead of behind it: some pieces in front, some behind.
+    static constexpr float kHeapRise = 0.052f;
     static constexpr float kHeapSink = 0.22f;
 
     /// How far below the opening an arm's root starts. Buried, so the arm
@@ -265,11 +320,40 @@ private:
     /// seen.
     static constexpr float kRootDepth = 0.10f;
 
-    /// Recompute each arm's curl and where it is swinging. Every step.
+    /// What an arm is doing. A vocabulary rather than one parameterised
+    /// gesture: three arms all running the same curve with different
+    /// phases read as one creature flexing, however well that curve is
+    /// tuned. These differ in what they reach for and how tightly they are
+    /// allowed to bend, which is enough to look like separate intentions.
+    enum class Move {
+        Idle,   ///< drifting, up and out
+        Slap,   ///< over the rim and down the wall, landing along it
+        Coil,   ///< curled up on itself, tip near its own root
+        Wrap,   ///< tip travelling round the bin's circumference
+        Reach,  ///< after the pointer
+    };
+    struct ArmState
+    {
+        Move move = Move::Idle;
+        float t = 0.0f;         ///< seconds into the move
+        float duration = 2.0f;
+        float seed = 0.0f;      ///< re-rolled per move, so repeats differ
+    };
+    /// Re-solve every chain that is out. Every step.
     void updateArms();
+    /// Advance one arm's move clock, picking a new move when it runs out.
+    void advanceMove(int i, float dt);
+    /// 0 at the start of the current move, 1 at its end.
+    float moveProgress(int i) const;
+    ArmState m_state[kMaxTentacles];
+    QPointF m_cursor;
+    bool m_cursorOn = false;
 
-    /// The curl that throws the tip `outward` scene units sideways.
-    float curlForReach(float outward) const;
+    /// Where an arm is rooted, and what it is reaching for, both in scene
+    /// units. `hit` is 0 at rest and 1 at full strike.
+    QVector3D armBase(int i) const;
+    QVector3D armTarget(int i, float &flex, float &maxBend) const;
+
 
     BinMouth m_mouth;
     QSizeF m_binSize {40.0, 40.0};
@@ -279,8 +363,15 @@ private:
     float m_vel = 0.0f;
     float m_target = 0.0f;
     bool m_wasEmpty = true;
-    QVariantList m_arms;
+    float m_cameraTilt = 17.0f;
+    float m_dt = 0.033f;
+    /// One per seat, and they PERSIST between frames. That is the point of
+    /// a chain: it is solved from where it already was, so it lags its
+    /// target and carries the wave that was running down it. Rebuilt from
+    /// scratch each frame it would be as memoryless as the arc was.
+    TentacleChain m_chain[kMaxTentacles];
     IconTexture *m_iconTexture = nullptr;
+    SpineTexture *m_spine = nullptr;
 };
 
 } // namespace hyperbin

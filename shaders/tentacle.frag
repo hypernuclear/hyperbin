@@ -58,15 +58,37 @@ void MAIN()
         // behind the bin to be looked over the top of; nothing reaches
         // there — the deepest seat is 0.8 of the way back.)
         //
-        // Nine tenths of the opening, in both axes, because the bin
-        // TAPERS: measured on the macOS trash the body is 0.98 of the
-        // opening at the lip and 0.78 near the foot, so a constant has to
-        // be an average and this one is the width a quarter of the way
-        // down, where a strike lands.
+        // TAPERED with depth, not a constant. Measured on the macOS trash
+        // the body is 0.98 of the opening at the lip and 0.78 near the
+        // foot, and this was a single average of 0.90 — which is wrong at
+        // both ends and was wrong in a way that showed the moment the arms
+        // started lingering near the rim. Everything between 0.90 and the
+        // real 0.98 counted as outside the bin, so arm tips draped just
+        // under the lip were drawn over the front wall in a band about
+        // twenty pixels wide. Measured, 7,135 leaked pixels, all of them
+        // over the shaded body and none anywhere else.
+        //
         // Asked about the SPINE, not this fragment — see tentacle.vert for
         // why, and for what testing the fragment did to the arm instead.
-        float ex = vSpine.x / binHalfSize.x;
-        float nearFace = binHalfSize.y * sqrt(max(0.0, 1.0 - ex * ex));
+        // SPLIT between the fragment and the spine, because the two halves
+        // of this test want different things and it took two goes to see
+        // it. Sideways, the bin's edge is a boundary in SCREEN space: a cut
+        // along it is a vertical line through the arm, which leaves a solid
+        // shape and reads as the arm passing behind the bin's edge. That
+        // wants the fragment, and asking the spine instead makes a whole
+        // cross-section visible the moment its centre line clears the edge
+        // — so a fat arm draped on the rim spilled half its width across
+        // the bin's face. Measured, 8,705 pixels on one frame.
+        //
+        // In DEPTH it is the opposite, and that is the trap: the wall faces
+        // the camera, so a per-fragment depth test discards the near side
+        // of the tube and keeps the far side, which is a hole straight
+        // through the arm. That half has to ask the spine, once per
+        // cross-section.
+        float below = clamp((lipY - vLocal.y) / max(binHeight, 1e-4), 0.0, 1.0);
+        vec2 halfSize = binHalfSize * mix(bodyTop, bodyFoot, below);
+        float ex = vLocal.x / halfSize.x;
+        float nearFace = halfSize.y * sqrt(max(0.0, 1.0 - ex * ex));
         bool underBin = uv.y > arc && abs(ex) < 1.0 && vSpine.z < nearFace;
 
         // --- and behind the RUBBISH -------------------------------------

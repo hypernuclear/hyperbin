@@ -275,10 +275,12 @@ qt_add_executable(hyperbin
     src/core/DistanceField.h
     src/core/BinMouth.cpp
     src/core/OozeSim.cpp
+    src/core/TentacleChain.cpp
     src/core/OozeSim.h
     src/effects/FliesEffect.cpp
     src/effects/FliesEffect.h
     src/effects/IconTexture.cpp
+    src/effects/SpineTexture.cpp
     src/effects/OozeEffect.cpp
     src/effects/TentacleEffect.cpp
     src/effects/OozeEffect.h
@@ -392,6 +394,7 @@ qt_add_resources(hyperbin "hyperbin_shaders3d"
 # Headless swarm check. No GUI, so it runs on CI and under the debugger
 # without a display.
 add_executable(simtest tests/simtest.cpp src/core/FlySim.cpp src/core/OozeSim.cpp
+    src/core/TentacleChain.cpp
                src/core/DistanceField.cpp src/app/Settings.cpp)
 target_include_directories(simtest PRIVATE src/core src/app)
 # Gui, not just Core: the distance field is a QImage. It needs no display

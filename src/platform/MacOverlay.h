@@ -20,6 +20,15 @@ void configureOverlayWindow(QWindow *w);
 /// allowed — this stops throttling, it does not keep the Mac awake.
 void setAnimationActivity(bool active);
 
+/// Keep a dev-preview window out of the user's way.
+///
+/// The preview harness opens a normal window, renders, grabs and exits.
+/// Left alone that window activates the app, takes keyboard focus and
+/// lands on top of whatever the user was doing — which for a harness that
+/// gets run dozens of times in a row is genuinely disruptive. This puts it
+/// below everything and stops it accepting focus, so a grab can happen
+/// while somebody else is working.
+void configurePreviewWindow(QWindow *w);
 /// Bring the app forward so a window it has just opened is actually seen.
 ///
 /// An LSUIElement agent has no Dock icon and is not in the activation

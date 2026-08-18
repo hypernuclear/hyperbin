@@ -61,6 +61,16 @@ Item {
             eulerRotation: Qt.vector3d(-35, -25, 0)
             brightness: 1.6
         }
+        // The chains are solved in C++ but the camera lives here, and the
+        // solver needs its tilt to turn the opening's measured on-screen
+        // half-height into a reach in z. Pushed rather than duplicated as
+        // a constant on both sides.
+        Binding {
+            target: root.effect
+            property: "cameraTilt"
+            value: cam.tilt
+            when: root.effect !== null
+        }
 
         Node {
             id: binNode
@@ -90,77 +100,37 @@ Item {
                         const s = Math.sin(index * 127.1 + 311.7) * 43758.5453;
                         return s - Math.floor(s);
                     }
-                    readonly property var state: root.effect
-                        && index < root.effect.arms.length
-                        ? root.effect.arms[index] : null
                     // Where this arm sits, as fractions of the opening —
                     // a triangle with its apex at the back. The table and
                     // the reasoning are in src/effects/TentacleEffect.h.
                     readonly property var seat: root.effect
                         && index < root.effect.seats.length
                         ? root.effect.seats[index] : null
-                    // The opening is a CIRCLE in 3D seen at a tilt, so its
-                    // reach in z is its on-screen half-height divided by
-                    // the sine of that tilt. Laid out on the screen
-                    // ellipse's own dimensions instead, every arm would
-                    // bunch against the front of the bin.
-                    readonly property real zScale:
-                        1.0 / Math.max(0.05, Math.sin(cam.tilt * Math.PI / 180))
-                    readonly property real baseX:
-                        (root.effect ? root.effect.mouthX : 0)
-                        + (root.effect ? root.effect.mouthRadius : 20)
-                          * (seat ? seat.x : 0)
-                    readonly property real baseZ:
-                        (root.effect ? root.effect.mouthDepth : 6) * zScale
-                        * (seat ? seat.y : 0)
-                    readonly property real baseY:
-                        root.effect ? root.effect.rootY : 0
-                    // Both from C++, because both are derived from the bin
-                    // rather than chosen: the length is what it takes to
-                    // reach over the rim and down the outside, and the
-                    // size is the fake perspective an orthographic camera
-                    // does not supply.
-                    readonly property real armLength:
-                        (root.effect ? root.effect.armLength : 20)
-                        * (seat ? seat.z : 1)
-
-                    // One mesh, one draw call. This was sixteen #Sphere
-                    // models per arm — eighty nodes for five arms, each
-                    // drawn a couple of pixels across. The bend now
-                    // happens in the vertex shader, which is how the gel
-                    // does it too (shaders/ooze3d.vert).
+                    // Fake perspective, the one thing the seat is still
+                    // read for here — an orthographic camera does not
+                    // shrink the far arm, so it is scaled by hand.
+                    readonly property real sizeScale: seat ? seat.z : 1
                     Model {
+                        id: armModel
                         source: "qrc:/icons/meshes/tentacle.mesh"
-                        position: Qt.vector3d(arm.baseX, arm.baseY, arm.baseZ)
-                        // The mesh is authored standing up its own +Y,
-                        // base at the origin, 8.932 units long — see
-                        // "Bringing in a model" in docs/effects.md. Scaled
-                        // so an arm reaches from inside the bin to a bit
-                        // over the rim whatever size the icon is drawn at.
-                        // Length and girth scaled SEPARATELY. Uniform
-                        // scaling ties the two together, and this model is
-                        // nine times longer than it is wide — sized by
-                        // length alone it is a whip, and sized by girth
-                        // alone it runs off the top of the screen.
+                        // NO TRANSFORM. Position, length and bend all
+                        // live in the solved chain, in scene units, so the
+                        // model is a plain container sitting on the bin's
+                        // own origin and every vertex is placed by the
+                        // shader. It used to carry a position and an
+                        // anisotropic scale; with a chain those would have
+                        // to be undone before the joints could be used.
                         //
-                        // The multiplier is set so the base lands at about
-                        // 0.22 of the bin's width, which is what reads as
-                        // an arm rather than a cable at Dock size. It is
-                        // MESH-SPECIFIC and has to be re-derived whenever
-                        // the model changes: it is compensating for the
-                        // mesh's own radius-to-length ratio, which for
-                        // this one is 0.054 at its thickest.
-                        //
-                        // What no longer needs compensating for is the
-                        // TAPER. The model this replaced fell to a tenth
-                        // of its peak radius by the tip, so most of its
-                        // length was thin whatever it was scaled by and
-                        // the multiplier was fighting that. This one holds
-                        // a third of its peak at the tip, so it reads as
-                        // thick along its whole length on its own.
-                        readonly property real k: arm.armLength / 8.932
-                        readonly property real girth: k * 1.40
-                        scale: Qt.vector3d(girth, k, girth)
+                        // Girth is the one thing left, because the chain
+                        // is a centre line and carries no thickness. The
+                        // multiplier is MESH-SPECIFIC — it compensates for
+                        // the model's own radius-to-length ratio, 0.054 at
+                        // its thickest — and lands the base at about 0.22
+                        // of the bin's width, which reads as an arm rather
+                        // than a cable at Dock size.
+                        readonly property real girth:
+                            (root.effect ? root.effect.armLength : 20)
+                            * arm.sizeScale / 8.932 * 1.52
                         // One material per arm, and it has to be: the
                         // sway phase is a uniform, and five arms waving
                         // in step read as one object with five prongs.
@@ -198,10 +168,16 @@ Item {
                             // how far along an arm a vertex is without
                             // knowing how it has been scaled.
                             property real meshLength: 8.932
-                            property real time: root.effect ? root.effect.time : 0
-                            property real armPhase: arm.seed * 6.2831853
-                            property real curlAngle: arm.state ? arm.state.x : 0.5
-                            property real curlDir: arm.state ? arm.state.y : 0.0
+                            // The solved chain. Two rows an arm — joint
+                            // positions then the frame across it — so the
+                            // row to read is twice the index.
+                            property TextureInput spineTex: TextureInput {
+                                texture: spineTexture
+                            }
+                            property int armRow: arm.index
+                            property int jointCount:
+                                root.effect ? root.effect.jointCount : 16
+                            property real girthScale: armModel.girth
 
                             // --- the rubbish, as a volume ---------------
                             //
@@ -212,8 +188,7 @@ Item {
                             // axes, which for z means the tilt-corrected
                             // reach and not the screen ellipse's height.
                             readonly property real heapZ:
-                                (root.effect ? root.effect.mouthDepth : 6)
-                                * arm.zScale
+                                root.effect ? root.effect.mouthReachZ : 20
                             readonly property real heapTop:
                                 root.effect ? root.effect.heapTopY : 0
                             readonly property real heapFloor:
@@ -261,9 +236,21 @@ Item {
                             // shows a sliver of arm that is really inside;
                             // erring wide deletes a strike that is really
                             // outside. Narrow is the cheaper mistake.
+                            // The opening's full half-width in both axes;
+                            // the shader tapers it with depth rather than
+                            // taking a single average.
                             property vector2d binHalfSize: Qt.vector2d(
-                                (root.effect ? root.effect.mouthRadius : 20) * 0.90,
-                                Math.max(1, heapZ * 0.90))
+                                (root.effect ? root.effect.mouthRadius : 20),
+                                Math.max(1, heapZ))
+                            property real lipY:
+                                root.effect ? root.effect.mouthY : 0
+                            property real binHeight: root.binH
+                            // From C++, so the mask and the strike aim at
+                            // the same wall.
+                            property real bodyTop:
+                                root.effect ? root.effect.bodyTaperTop : 0.98
+                            property real bodyFoot:
+                                root.effect ? root.effect.bodyTaperFoot : 0.78
                             vertexShader: "qrc:/shaders3d/tentacle.vert"
                             fragmentShader: "qrc:/shaders3d/tentacle.frag"
                         }
@@ -276,6 +263,20 @@ Item {
 
     // The bin's artwork, and the arm's own maps. Declared once and
     // referenced by every arm's material, so each is uploaded once.
+    // The solved chains. NEAREST and no mipmaps, deliberately: these are
+    // joint positions in scene units, not a picture, and the shader reads
+    // them with texelFetch. Filtering would interpolate between two arms
+    // at the row boundary.
+    Texture {
+        id: spineTexture
+        textureData: root.effect ? root.effect.spineTexture : null
+        minFilter: Texture.Nearest
+        magFilter: Texture.Nearest
+        mipFilter: Texture.None
+        generateMipmaps: false
+        tilingModeHorizontal: Texture.ClampToEdge
+        tilingModeVertical: Texture.ClampToEdge
+    }
     Texture {
         id: binTexture
         textureData: root.effect ? root.effect.iconTexture : null

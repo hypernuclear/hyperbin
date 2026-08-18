@@ -1,6 +1,7 @@
 #include "app/Settings.h"
 #include "app/TrayMenu.h"
 #include "core/PowerPolicy.h"
+#include "platform/LowPower.h"
 #include "platform/TrashTarget.h"
 #include "render/EffectItem.h"
 #include "update/AppUpdater.h"
@@ -688,6 +689,44 @@ int main(int argc, char **argv)
     // no frames, so the exit animation could not have run even if it had
     // stayed. Anything that stops the clock has to wait for the clock's
     // last job to finish.
+    // --- low power ---------------------------------------------------------
+    // The menu's three-way choice, resolved against what the OS is doing.
+    // This is the only place the two are combined; PowerPolicy is handed a
+    // single already-decided answer.
+    //
+    // Both inputs were previously never wired at all — setOnBattery and
+    // setLowPowerMode existed, were read by the policy, and had no callers
+    // — so the documented promise in docs/battery.md that the rate halves
+    // on battery and stops in Low Power Mode did nothing whatsoever.
+    auto *lowPowerWatch = new LowPowerWatch(&app);
+    auto applyLowPower = [&] {
+        bool conserve = false;
+        switch (settings.lowPower()) {
+        case Settings::LowPower::On:   conserve = true; break;
+        case Settings::LowPower::Off:  conserve = false; break;
+        case Settings::LowPower::Auto: conserve = lowPowerWatch->active(); break;
+        }
+        power.setLowPower(conserve);
+    };
+    QObject::connect(&settings, &Settings::lowPowerChanged, &app,
+                     [&](Settings::LowPower) { applyLowPower(); refreshStatus(); });
+    QObject::connect(lowPowerWatch, &LowPowerWatch::activeChanged, &app,
+                     [&](bool) { applyLowPower(); refreshStatus(); });
+    applyLowPower();
+
+    // The display's own rate, so a 120Hz screen is animated at 120Hz. It
+    // follows the window, because dragging the Dock to a second monitor
+    // changes the answer.
+    auto applyRefresh = [&] {
+        if (win && win->screen())
+            power.setRefreshHz(win->screen()->refreshRate());
+    };
+    if (win) {
+        QObject::connect(win, &QWindow::screenChanged, &app,
+                         [&](QScreen *) { applyRefresh(); });
+        applyRefresh();
+    }
+
     auto *exitTimer = new QTimer(&app);
     exitTimer->setSingleShot(true);
 

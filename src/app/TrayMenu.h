@@ -94,6 +94,7 @@ private:
     QAction      *m_update    = nullptr;
     QAction      *m_analytics = nullptr;
     QActionGroup *m_effectGroup = nullptr;
+    QActionGroup *m_lowPowerGroup = nullptr;
     QActionGroup *m_densityGroup   = nullptr;
     QActionGroup *m_thresholdGroup = nullptr;
 };

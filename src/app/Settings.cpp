@@ -43,6 +43,10 @@ Settings::Settings(QObject *parent, const QString &appName)
     // into the headless tests too. An unknown or empty id is resolved by
     // the registry at construction time.
     m_infestation = m_store.value(QStringLiteral("infestation")).toString();
+    // Auto by default: the OS already knows whether the machine is being
+    // asked to conserve, and most people will never open this menu.
+    m_lowPower = LowPower(m_store.value(QStringLiteral("lowPower"),
+                                        int(LowPower::Auto)).toInt());
     // Relative by default: tying the swarm to how much rubbish is
     // actually there is the whole idea, and the fixed steps are for
     // people who want it to stop being clever.
@@ -85,6 +89,15 @@ void Settings::setInfestation(const QString &id)
     emit appearanceChanged();
 }
 
+void Settings::setLowPower(LowPower m)
+{
+    if (m == m_lowPower)
+        return;
+    m_lowPower = m;
+    m_store.setValue(QStringLiteral("lowPower"), int(m));
+    flush();
+    emit lowPowerChanged(m);
+}
 void Settings::setDensity(Density d)
 {
     if (d == m_density)

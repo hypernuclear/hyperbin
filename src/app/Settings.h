@@ -44,7 +44,21 @@ public:
     };
     Q_ENUM(Threshold)
 
+    /// Low Power Mode, as a THREE-way choice rather than a reading of the
+    /// battery.
+    ///
+    /// "On battery" was the wrong question. Somebody on mains may want the
+    /// thing calm, and somebody unplugged may not care — the two are only
+    /// correlated. So this asks what the user wants, with Auto for the
+    /// common case of "do whatever the OS is doing".
+    enum class LowPower {
+        Auto = 0,   ///< follow the OS's own Low Power Mode / Battery Saver
+        On   = 1,
+        Off  = 2,
+    };
+    Q_ENUM(LowPower)
     bool      enabled() const   { return m_enabled; }
+    LowPower  lowPower() const  { return m_lowPower; }
     /// Which effect is running, by id — an opaque string, not an enum
     /// ordinal: ordinals silently change meaning when the list is
     /// reordered, and this list is expected to grow. Empty means "not
@@ -55,6 +69,7 @@ public:
     Threshold threshold() const { return m_threshold; }
 
     void setEnabled(bool on);
+    void setLowPower(LowPower m);
     void setInfestation(const QString &id);
     void setDensity(Density d);
     void setThreshold(Threshold t);
@@ -69,6 +84,7 @@ public:
 
 signals:
     void enabledChanged(bool on);
+    void lowPowerChanged(LowPower m);
     void infestationChanged(const QString &id);
     /// Anything that changes how the swarm should look.
     void appearanceChanged();
@@ -79,6 +95,7 @@ private:
     void flush();
     QSettings m_store;
     bool      m_enabled;
+    LowPower  m_lowPower;
     QString   m_infestation;
     Density   m_density;
     Threshold m_threshold;

@@ -3,14 +3,15 @@
 namespace hyperbin {
 
 namespace {
-// 60fps on mains. 20fps was the original budget-driven guess and it read
-// as choppy rather than twitchy once there was something to look at
-// (Leo, 2026-08-09), so smoothness wins and we pay for it in frames.
-// Frame cadence is still the dominant power cost (docs/battery.md), so
-// this is the number to revisit if measurement comes back bad — and the
-// idle rules matter more than ever now that active frames cost 3x.
-constexpr int kActiveMs  = 16;
-constexpr int kBatteryMs = 33; // halve the rate off mains
+// Conserving runs at 30fps. NOT conserving runs at whatever the display
+// does — see refreshMs — because a 120Hz screen should get 120Hz.
+//
+// 20fps was the original budget-driven guess and it read as choppy rather
+// than twitchy once there was something to look at (Leo, 2026-08-09).
+// Frame cadence is still the dominant power cost (docs/battery.md), which
+// is exactly why the conserving path halves it rather than stopping: a
+// paused novelty is forgiven, a drained battery is not.
+constexpr int kLowPowerMs = 33;
 } // namespace
 
 PowerPolicy::PowerPolicy(QObject *parent)
@@ -23,8 +24,14 @@ void PowerPolicy::setEffectIdle(bool v)    { if (m_effectIdle    != v) { m_effec
 void PowerPolicy::setEffectAtRest(bool v)  { if (m_effectAtRest  != v) { m_effectAtRest  = v; bump(); } }
 void PowerPolicy::setTargetVisible(bool v) { if (m_targetVisible != v) { m_targetVisible = v; bump(); } }
 void PowerPolicy::setDisplayAwake(bool v)  { if (m_displayAwake  != v) { m_displayAwake  = v; bump(); } }
-void PowerPolicy::setOnBattery(bool v)     { if (m_onBattery     != v) { m_onBattery     = v; bump(); } }
-void PowerPolicy::setLowPowerMode(bool v)  { if (m_lowPower      != v) { m_lowPower      = v; bump(); } }
+void PowerPolicy::setLowPower(bool v)      { if (m_lowPower      != v) { m_lowPower      = v; bump(); } }
+void PowerPolicy::setRefreshHz(qreal v)
+{
+    if (qFuzzyCompare(m_refreshHz, v) || v < 20.0)
+        return;
+    m_refreshHz = v;
+    bump();
+}
 void PowerPolicy::setEnabled(bool v)       { if (m_enabled       != v) { m_enabled       = v; bump(); } }
 void PowerPolicy::setDismissed(bool v)     { if (m_dismissed     != v) { m_dismissed     = v; bump(); } }
 
@@ -38,8 +45,6 @@ bool PowerPolicy::shouldRender() const
     if (m_dismissed)
         return false;
     if (!m_displayAwake || !m_targetVisible)
-        return false;
-    if (m_lowPower)
         return false;
     // An empty bin costs zero — but let a departing effect finish first.
     if (m_binEmpty && m_effectIdle)
@@ -55,7 +60,13 @@ int PowerPolicy::frameIntervalMs() const
     // and the last frame stays on it; we simply stop producing new ones.
     if (m_effectAtRest)
         return 0;
-    return m_onBattery ? kBatteryMs : kActiveMs;
+    if (m_lowPower)
+        return kLowPowerMs;
+    // One frame per refresh. Floored at 4ms so a bogus rate cannot turn
+    // the clock into a spin, and never SLOWER than the conserving rate,
+    // which would make Low Power Mode speed things up on a 24Hz display.
+    const int ms = int(qRound(1000.0 / m_refreshHz));
+    return qBound(4, ms, kLowPowerMs);
 }
 
 void PowerPolicy::bump()

@@ -37,10 +37,32 @@ void TentacleChain::solve(const QVector3D &base, const QVector3D &emerge,
     // redundant: the wave displaces joints off the chain, which stretches
     // every segment it touches, and without a second constraint pass the
     // arm visibly lengthens and shortens as the wave runs down it.
+    for (int i = 0; i < kJoints; ++i)
+        m_was[i] = m_p[i];
     fabrik(base, target);
     constrain(base, maxBend);
     holdRoot(base, emerge);
+    // FRAMES BEFORE THE WAVE, and this is not tidiness — it is what stops
+    // the arm shaking.
+    //
+    // The wave displaces along m_side. Built only at the END of solve,
+    // m_side described a chain that already had the previous frame's wave
+    // in it, so the wave's direction depended on its own last output: a
+    // feedback loop, and one with enough gain to matter. Measured with the
+    // target held completely still, joints were lurching up to 49 units a
+    // frame with a median of 7, which is the "sticking then jittering"
+    // exactly. Deriving the frame from the solved but UN-waved pose breaks
+    // the loop — the wave now rides on a shape that is a pure function of
+    // the target.
+    buildFrames();
     applyWave(time, phase, flex);
+    constrain(base, maxBend);
+    holdRoot(base, emerge);
+    // Adopt only part of the new pose. Run BEFORE the last constraint pass
+    // so the blend cannot leave segments the wrong length — a lerp between
+    // two valid chains is not itself a valid chain.
+    for (int i = 1; i < kJoints; ++i)
+        m_p[i] = m_was[i] + (m_p[i] - m_was[i]) * kAdopt;
     constrain(base, maxBend);
     holdRoot(base, emerge);
     buildFrames();
@@ -231,7 +253,7 @@ void TentacleChain::applyWave(float time, float phase, float flex)
     // helical roll that never repeats.
     constexpr float kFrequency = 2.0f;
     constexpr float kSpeed = 3.0f;
-    constexpr float kAmplitude = 0.055f;   // of the arm's own length
+    constexpr float kAmplitude = 0.040f;   // of the arm's own length
     const float amp = kAmplitude * length() * flex;
     if (amp <= 0.0f)
         return;

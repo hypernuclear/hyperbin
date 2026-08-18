@@ -393,6 +393,8 @@ private:
     /// 0 at the start of the current move, 1 at its end.
     float moveProgress(int i) const;
     ArmState m_state[kMaxTentacles];
+    QVector3D m_lastTarget[kMaxTentacles];
+    QVector3D m_lastJoints[kMaxTentacles][TentacleChain::kJoints];
     QPointF m_cursor;
     bool m_cursorOn = false;
 

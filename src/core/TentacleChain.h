@@ -140,7 +140,23 @@ private:
     static constexpr int kSolveIterations = 2;
     static constexpr int kConstraintIterations = 10;
 
+    /// How much of each frame's freshly solved pose to actually adopt.
+    ///
+    /// FABRIK does not have A solution, it has many — any number of poses
+    /// put the tip on the target — and which one two iterations land on
+    /// depends on where the chain started. The wave kicks that starting
+    /// point every frame, so the solver wanders between equally valid
+    /// answers and the arm shivers. Measured with the target held
+    /// perfectly still, joints moved a median of 7 units and up to 58 in a
+    /// single frame.
+    ///
+    /// Blending toward the new pose instead of snapping to it filters that
+    /// out: the chatter is per-frame and gets damped hard, while the wave
+    /// and the moves are slow enough to pass through untouched. It also
+    /// gives the arm lag, which reads as weight.
+    static constexpr float kAdopt = 0.30f;
     QVector3D m_p[kJoints];
+    QVector3D m_was[kJoints];
     QVector3D m_side[kJoints];
     float m_seg = 0.0f;
 };

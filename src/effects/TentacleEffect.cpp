@@ -3,6 +3,8 @@
 #include "IconTexture.h"
 #include "SpineTexture.h"
 
+#include <QtGlobal>
+
 #include <algorithm>
 #include <cmath>
 
@@ -467,7 +469,13 @@ QVector3D TentacleEffect::keepInFront(const QVector3D &t) const
     // Faded in over the lip rather than switched at it, so an arm crossing
     // the rim eases forward instead of jumping.
     const float binH = float(m_binSize.height());
-    const float under = std::clamp((mouthY() - t.y()) / (binH * 0.12f), 0.0f, 1.0f);
+    // Faded over a THIRD of the bin, not a tenth. A slap drives its
+    // target down about thirty units a frame, so a ramp this short
+    // finished in two frames and the target leapt 150 units forward in z
+    // while it did — measured, a 91-unit jump every slap, and the arm
+    // lurched over 100 units chasing it. The ramp has to be long compared
+    // to how fast a target crosses it, not compared to the bin.
+    const float under = std::clamp((mouthY() - t.y()) / (binH * 0.35f), 0.0f, 1.0f);
     const float front = mouthReachZ() * 1.10f;
     return QVector3D(t.x(), t.y(), std::max(t.z(), front * under));
 }
@@ -539,6 +547,17 @@ void TentacleEffect::updateArms()
         if (sink > 0.0f)
             maxBend = TentacleChain::kMaxBend
                     + (TentacleChain::kCoilBend - TentacleChain::kMaxBend) * sink;
+        // HYPERBIN_DEBUG: shout when a target teleports. A move change is
+        // meant to be continuous -- every move begins and ends at the
+        // resting pose precisely so the arm is never asked to be somewhere
+        // else in one frame.
+        if (Q_UNLIKELY(qEnvironmentVariableIsSet("HYPERBIN_DEBUG"))) {
+            const float jump = (target - m_lastTarget[i]).length();
+            if (jump > float(m_binSize.height()) * 0.25f && m_lastTarget[i] != QVector3D())
+                qInfo("tentacle %d: TARGET jumped %.0f (move %d)",
+                      i, double(jump), int(m_state[i].move));
+            m_lastTarget[i] = target;
+        }
         m_chain[i].solve(sunk, emerge, target, m_time,
                          armHash(float(i), 3.0f) * 6.28318531f, flex, maxBend);
         m_chain[i].curlUp(sunk, emerge, 1.30f, rollAmount(i));
@@ -548,6 +567,24 @@ void TentacleEffect::updateArms()
                                mouthRadius(), mouthReachZ(), kBodyFoot / kBodyTop,
                                TentacleChain::kRootHeld + 1);
         m_chain[i].settle(sunk, emerge, maxBend);
+    }
+    // ...and shout when the ARM itself lurches, which is the symptom
+    // rather than its cause: a target that teleports is one thing, a chain
+    // that thrashes while its target sits still is quite another.
+    if (Q_UNLIKELY(qEnvironmentVariableIsSet("HYPERBIN_DEBUG"))) {
+        for (int i = 0; i < n; ++i) {
+            float worst = 0.0f;
+            if (m_lastJoints[i][0] != QVector3D() || m_lastJoints[i][1] != QVector3D()) {
+                for (int j = 0; j < TentacleChain::kJoints; ++j)
+                    worst = std::max(worst,
+                        (m_chain[i].joints()[j] - m_lastJoints[i][j]).length());
+                if (worst > float(m_binSize.height()) * 0.10f)
+                    qInfo("tentacle %d: JOINT lurched %.0f in one frame (move %d)",
+                          i, double(worst), int(m_state[i].move));
+            }
+            for (int j = 0; j < TentacleChain::kJoints; ++j)
+                m_lastJoints[i][j] = m_chain[i].joints()[j];
+        }
     }
     m_spine->setChains(m_chain, n, kMaxTentacles);
 }

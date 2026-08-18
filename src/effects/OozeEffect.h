@@ -56,6 +56,41 @@ class OozeEffect : public Effect
     /// by the first and hands the second to the eyeball's own material,
     /// which is where the lids are drawn.
     Q_PROPERTY(QVariantList eyeNormals READ eyeNormals NOTIFY frameChanged)
+    /// WHERE THE POINTER IS, in the scene's own units, and how much the
+    /// eyes should care. The pair is what makes them follow it.
+    ///
+    /// A point rather than a direction, because the whole charm of a
+    /// cluster of eyes tracking something is that they CONVERGE on it: the
+    /// ones on the left and the ones on the right turn by different
+    /// amounts, and only a shared target produces that. Handing down one
+    /// direction would have them all swing in parallel, which reads as the
+    /// gel tilting rather than as being looked at.
+    ///
+    /// Placed on the pointer's view ray at a fixed distance in front of the
+    /// bin. Under an orthographic camera every point on that ray projects
+    /// to the same pixel, so the depth chosen does not change WHERE the
+    /// eyes appear to look — only how strongly they converge. See
+    /// kGazeDepth.
+    Q_PROPERTY(QVector3D gazeTarget READ gazeTarget NOTIFY frameChanged)
+    /// 0 when the pointer is nowhere near, 1 when it is on the bin.
+    ///
+    /// Faded by distance and then low-passed, because the host polls the
+    /// pointer every frame and always reports it present — the overlay is
+    /// click-through and gets no enter or leave events, so "present" says
+    /// nothing about whether it is anywhere near. Distance is the only
+    /// real signal, and a pointer that jumps across the screen has to
+    /// arrive as a movement rather than as a step.
+    Q_PROPERTY(float gazePull READ gazePull NOTIFY frameChanged)
+    /// The scene camera's downward tilt, degrees. WRITTEN BY THE SCENE.
+    ///
+    /// Needed here because the pointer arrives as a position ON SCREEN and
+    /// the eyes are placed in the scene: recovering one from the other
+    /// turns on the tilt. Pushed in rather than restated as a constant, so
+    /// there is one camera tilt in the app and not two that can drift
+    /// apart — the same arrangement TentacleEffect uses, and for the same
+    /// reason.
+    Q_PROPERTY(float cameraTilt READ cameraTilt WRITE setCameraTilt
+                   NOTIFY shapeChanged)
     /// How many there can ever be. The scene builds this many delegates
     /// once and hides the ones that are not out; rebuilding the Repeater3D
     /// whenever the count moved cost four times the whole effect when the
@@ -111,6 +146,10 @@ public:
     QVariantList eyeSpheres() const { return m_eyeSpheres; }
     QVariantList eyeNormals() const { return m_eyeNormals; }
     int maxEyes() const { return kMaxEyes; }
+    QVector3D gazeTarget() const { return m_gazeTarget; }
+    float gazePull() const { return m_gazePull; }
+    float cameraTilt() const { return m_cameraTilt; }
+    void setCameraTilt(float degrees);
 
     const OozeSim &sim() const { return m_sim; }
     /// The gel's silhouette, measured from the bin's artwork. Read by
@@ -198,6 +237,21 @@ private:
     float m_spreadKey = 0.0f;
     QSizeF  m_binSize {40.0, 40.0};
     QRectF  m_binRect;
+    QPointF m_cursor;
+    bool    m_cursorOn = false;
+    QVector3D m_gazeTarget;
+    float   m_gazePull = 0.0f;
+    float   m_cameraTilt = 17.0f;
+    /// How far in front of the bin the gaze target is parked, in bin
+    /// heights. Only the CONVERGENCE depends on it — the camera is
+    /// orthographic, so sliding the target along the pointer's view ray
+    /// leaves it over the same pixel. Near, the eyes cross like something
+    /// examining a fly on the glass; far, they turn nearly in parallel and
+    /// the cluster stops reading as a group looking at one thing. Two bin
+    /// heights is a comfortable reading distance for a face this size.
+    static constexpr float kGazeDepth = 1.15f;
+    /// Recompute where the pointer is and how much the eyes care.
+    void updateGaze(float dt);
     float   m_contentLine = 0.22f;
     bool    m_wasEmpty = true;
     QVector<quint8> m_coverage;

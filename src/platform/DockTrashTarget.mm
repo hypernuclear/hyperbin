@@ -427,7 +427,18 @@ void DockTrashTarget::pollIconRect()
 
     // AX reports top-left-origin points, same convention and units as Qt
     // screen coordinates, so this needs no conversion.
-    const QRect axRect(int(pos.x), int(pos.y), int(size.width), int(size.height));
+    // ROUNDED, not truncated.
+    //
+    // AX hands these back as floats and the Dock does not keep its items
+    // on integer pixels — hovering perturbs the layout by fractions. Under
+    // int(), a position drifting across 100.0 reads 100, 99, 100, 99 and
+    // the overlay window is moved a whole pixel each time, so the gel
+    // shivers against the icon it is supposed to be poured over. Rounding
+    // halves the error and, more to the point, removes the bias: int()
+    // always falls toward zero, so the overlay sat consistently half a
+    // pixel up and to the left of the artwork.
+    const QRect axRect(qRound(pos.x), qRound(pos.y),
+                       qRound(size.width), qRound(size.height));
     const QRect r = visualIconRect(axRect);
 
     // An auto-hidden Dock parks its items just outside the screen it
@@ -465,7 +476,25 @@ void DockTrashTarget::pollIconRect()
     if (was != m_status)
         qInfo("hyperbin: trash icon at (%d,%d %dx%d) onScreen=%d",
               r.x(), r.y(), r.width(), r.height(), onScreen);
-    if (r != m_rect) {
+    // A DEADBAND on the position, and none on the size.
+    //
+    // Rounding stops the bias but not the oscillation: a position sitting
+    // near enough to a half-pixel still flips between two integers, and
+    // every flip moves the overlay window. One pixel of lag is invisible;
+    // one pixel of shimmer, thirty times a second, against a fixed icon,
+    // is not — which is what "the goo will not stay on the bin" was.
+    //
+    // Nothing on the size. A size change is the Dock actually resizing the
+    // tile, it is never noise, and the gel's whole shape is re-measured
+    // from it — so that has to be followed exactly or the geometry and the
+    // artwork disagree.
+    const bool moved = std::abs(r.x() - m_rect.x()) > kRectDeadbandPx
+                    || std::abs(r.y() - m_rect.y()) > kRectDeadbandPx;
+    const bool resized = r.size() != m_rect.size();
+    if (moved || resized) {
+        // Snap to the new position outright once it has genuinely moved.
+        // Carrying the deadband forward would leave a permanent offset
+        // that grows every time the icon travels.
         m_rect = r;
         emit iconRectChanged(r);
     }

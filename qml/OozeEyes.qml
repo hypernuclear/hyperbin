@@ -56,6 +56,13 @@ Node {
     readonly property var normals: effect ? effect.eyeNormals : []
     readonly property real time: effect ? effect.time : 0
 
+    /// The pointer, in the scene, and how much the eyes care about it.
+    /// Both computed in C++ — see OozeEffect::updateGaze, which also
+    /// explains why a POINT and not a direction.
+    readonly property vector3d gazeTarget:
+        effect ? effect.gazeTarget : Qt.vector3d(0, 0, 0)
+    readonly property real gazePull: effect ? effect.gazePull : 0
+
     /// Toward the camera. It is orthographic, so this is the same
     /// direction everywhere in the scene and there is no per-eye look-at
     /// to compute — only the lean away from it that the gel asks for.
@@ -105,13 +112,53 @@ Node {
                              : Qt.vector3d(0, 0, 0)
 
             // --- the gaze frame -----------------------------------------
-            // Somewhere between the lens and the way the gel faces here.
+            //
+            // What this eye would look at with no pointer about: the lens.
+            // The camera is orthographic, so that is the same direction for
+            // every eye in the scene.
+            //
+            // ...and what it looks at when there is one: the pointer, which
+            // is a POSITION, so each eye gets its own direction and the
+            // cluster converges. That difference is the whole effect —
+            // parallel gazes read as the gel tilting, converging ones as
+            // being looked at.
+            readonly property vector3d toPointer: {
+                const d = eyes.gazeTarget.minus(eye.position)
+                return d.length() > 0.001 ? d.normalized() : eyes.camDir
+            }
+            readonly property vector3d aim:
+                eyes.camDir.times(1 - eyes.gazePull)
+                    .plus(toPointer.times(eyes.gazePull))
+                    .normalized()
+
+            // Somewhere between what it is looking at and the way the gel
+            // faces here. The lean toward the normal is what keeps an eye
+            // out on the flank from staring through its own socket, and it
+            // does that job for the pointer exactly as it did for the lens
+            // — which is why following the pointer needed no clamp of its
+            // own. The pull is capped below 1 for the same reason it is on
+            // the tentacles: leaving a little of the resting pose in stops
+            // fourteen eyes locking into one dead-straight stare.
+            //
+            // The lean is EASED OFF while tracking. At rest it is doing
+            // the work described above — keeping a flank eye from staring
+            // through its own socket at a camera it cannot face. Under a
+            // pointer it is fighting the one thing the eyes are trying to
+            // say: measured at the full 0.55, a pointer swung from one side
+            // of the bin to the other moved the irises by under a quarter
+            // of an eye's radius, which is present in the numbers and
+            // invisible on screen. Halved while tracking, the same swing
+            // reads. It is not taken to zero — the socket is still there,
+            // and an eye out on the side that ignored it would look like a
+            // sticker.
+            readonly property real bias:
+                eyes.gazeBias * (1 - 0.5 * eyes.gazePull)
             readonly property vector3d gaze: normal
-                ? eyes.camDir.times(1 - eyes.gazeBias)
+                ? aim.times(1 - bias)
                       .plus(Qt.vector3d(normal.x, normal.y, normal.z)
-                                .times(eyes.gazeBias))
+                                .times(bias))
                       .normalized()
-                : eyes.camDir
+                : aim
 
             // Yaw then pitch, as two nested nodes rather than one node's
             // eulerRotation. Which order Qt composes a pair of Euler
@@ -140,8 +187,18 @@ Node {
                         // in four, is what sells the rest: an eye that is
                         // always darting never appears to have noticed
                         // you.
-                        eulerRotation.x: blank ? 0 : (eyes.rnd(fix, eye.index + 11) - 0.5) * 26
-                        eulerRotation.y: blank ? 0 : (eyes.rnd(fix, eye.index + 23) - 0.5) * 34
+                        // Damped down while the pointer has their
+                        // attention. A saccade is what an eye does when it
+                        // has nothing to look at; kept at full size on top
+                        // of tracking, the eye jitters around the thing it
+                        // is supposed to be locked on and reads as
+                        // struggling to focus. Not removed altogether — a
+                        // completely still eye is a dead one, and the
+                        // remainder is small enough to pass for the
+                        // micro-movement a real one never stops making.
+                        readonly property real dart: 1 - eyes.gazePull * 0.85
+                        eulerRotation.x: (blank ? 0 : (eyes.rnd(fix, eye.index + 11) - 0.5) * 26) * dart
+                        eulerRotation.y: (blank ? 0 : (eyes.rnd(fix, eye.index + 23) - 0.5) * 34) * dart
 
                         Model {
                             source: "qrc:/icons/meshes/eye.mesh"

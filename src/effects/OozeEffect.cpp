@@ -46,10 +46,84 @@ void OozeEffect::setBinRect(const QRectF &binRect)
 
 void OozeEffect::setFullness(float fullness) { m_sim.setFullness(fullness); }
 
-void OozeEffect::setCursor(const QPointF &, bool)
+void OozeEffect::setCursor(const QPointF &pos, bool present)
 {
-    // Sludge is not startled. Nothing here reacts to a pointer, so the
-    // effect never reports itself dismissed.
+    // The EYES react; the sludge does not. That distinction is why this
+    // still never reports itself dismissed: being dismissed means the
+    // effect has finished responding to the pointer and can be put away,
+    // and an eye that follows you is doing the opposite — it is at its
+    // most alive exactly when the pointer is there.
+    m_cursor = pos;
+    m_cursorOn = present;
+}
+
+void OozeEffect::updateGaze(float dt)
+{
+    const float binH = float(m_binSize.height());
+    if (binH <= 0.0f)
+        return;
+
+    // Item pixels with +y DOWN, to bin-local scene units with +y UP.
+    const QPointF centre = m_binRect.center();
+    const float sx = float(m_cursor.x() - centre.x());
+    const float sy = float(centre.y() - m_cursor.y());
+
+    // THE GOO'S OWN FOOTPRINT, and barely more.
+    //
+    // This was a radius from the bin's centre, out to three and a half bin
+    // heights — most of the screen around the icon. The eyes were
+    // therefore tracking almost all the time, and an eye that is always
+    // following you never appears to notice you: the interesting moment is
+    // the one where it starts. Worse, at that range the pointer is far
+    // enough away that every eye turns by only a few degrees, so the
+    // tracking is both constant and faint.
+    //
+    // Bounded by the gel instead. The puddle is the widest part of it, so
+    // that sets the sides; five per cent of slack either way keeps the
+    // edge off the silhouette, where a hard boundary would be most
+    // visible. Vertically it runs from under the spill to the gel's own
+    // surface. Inside that box the pointer is close, and close is what
+    // makes the eyes swing hard.
+    const float halfW = m_shape.poolRadius(m_sim.level()) * 1.05f;
+    const float top = m_shape.surfaceY(m_contentLine, m_sim.level());
+    const float bottom = m_shape.poolBottom();
+    // How far outside the box the pointer is, in each axis, as a share of
+    // the fade. Faded rather than switched: an eye that snapped to the
+    // pointer the instant it crossed a line would read as a trigger, and
+    // the whole illusion is a creature noticing something.
+    const float fade = std::max(binH * 0.10f, 1.0f);
+    const float outX = std::max(0.0f, std::abs(sx) - halfW);
+    const float outY = std::max(0.0f, std::max(bottom - sy, sy - top));
+    float raw = 0.0f;
+    if (m_cursorOn) {
+        const float t = std::clamp(std::hypot(outX, outY) / fade, 0.0f, 1.0f);
+        raw = 1.0f - t * t * (3.0f - 2.0f * t);
+    }
+    // About a fifth of a second to notice, and the same to lose interest.
+    // Not instant: a pointer crossing the screen would otherwise snap every
+    // eye through ninety degrees in one frame, which reads as a glitch
+    // rather than as a head turning.
+    m_gazePull += (raw - m_gazePull) * std::min(1.0f, dt * 5.0f);
+
+    // Un-project the pointer, then push it toward the camera.
+    //
+    // The screen y it arrives as is the scene's y foreshortened by the
+    // camera's tilt, so recovering the scene position divides by cos —
+    // the same correction the tentacles' mouth needed, and the same one
+    // that was missing there for a while and put every arm nine pixels
+    // low. Sliding along the view ray afterwards keeps it over the same
+    // pixel; see kGazeDepth.
+    const float tilt = m_cameraTilt * 3.14159265f / 180.0f;
+    const float c = std::max(0.2f, std::cos(tilt));
+    const float d = kGazeDepth * binH;
+    m_gazeTarget = QVector3D(sx,
+                             sy / c + d * std::sin(tilt),
+                             d * std::cos(tilt));
+    if (Q_UNLIKELY(qEnvironmentVariableIsSet("HYPERBIN_TRACE")))
+        qInfo("gaze: cursor(%.0f,%.0f) pull %.2f target(%.0f,%.0f,%.0f) tilt %.0f",
+              m_cursor.x(), m_cursor.y(), double(m_gazePull),
+              double(m_gazeTarget.x()), double(m_gazeTarget.y()),
+              double(m_gazeTarget.z()), double(m_cameraTilt));
 }
 
 void OozeEffect::setContentLine(float y01)
@@ -75,9 +149,19 @@ void OozeEffect::setSurface(const QVector<quint8> &coverage, int w, int h)
     emit shapeChanged();
 }
 
+void OozeEffect::setCameraTilt(float degrees)
+{
+    if (qFuzzyCompare(m_cameraTilt, degrees))
+        return;
+    m_cameraTilt = degrees;
+    emit shapeChanged();
+}
+
 void OozeEffect::step(float dt)
 {
     m_sim.step(dt);
+    // Before the eyes: where they look is part of where they are.
+    updateGaze(dt);
     updateEyes();
     emit frameChanged();
 

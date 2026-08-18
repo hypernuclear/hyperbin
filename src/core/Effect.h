@@ -18,6 +18,8 @@
 // it sixty times a second costs exactly as much as real animation.
 #pragma once
 
+#include "BinMouth.h"
+
 #include <QMargins>
 #include <QtGlobal>
 #include <QObject>
@@ -64,6 +66,20 @@ public:
     /// how, and why it works on both platforms. Effects that do not care
     /// where the rubbish sits can ignore it.
     virtual void setContentLine(float y01) { Q_UNUSED(y01); }
+
+    /// Where the bin's OPENING is — the ellipse you could reach into.
+    ///
+    /// Everything else here describes the bin's outline. This describes
+    /// the hole in the top of it, which the outline cannot: the near lip
+    /// runs THROUGH the silhouette, not around it. An effect that has
+    /// something come out of the bin needs it, both to know where the way
+    /// out is and to know what should pass behind the front wall on the
+    /// way; an effect that only crawls over the outside can ignore it.
+    ///
+    /// Measured from the artwork, not assumed — see core/BinMouth. Check
+    /// `measured` before leaning on it hard; it falls back to a generic
+    /// bin rather than refusing to answer.
+    virtual void setMouth(const BinMouth &mouth) { Q_UNUSED(mouth); }
     /// The bin's artwork itself, in colour.
     ///
     /// Node-based effects get this as a texture in updateNode() and can
@@ -79,14 +95,21 @@ public:
 
     /// Advance by `dt` seconds. Never called while isAtRest() is true.
     virtual void step(float dt) = 0;
-    /// The slowest frame interval this effect is happy with, in ms.
-    /// 0 means "whatever the power policy says".
-    ///
-    /// For an effect that genuinely never rests — ooze bubbles for as
-    /// long as there is trash — this is the only lever left on its cost.
-    /// The policy still decides whether to draw AT ALL; this only asks
-    /// for less often when it does.
-    virtual int preferredFrameIntervalMs() const { return 0; }
+    // There is deliberately no per-effect frame interval here.
+    //
+    // There was: effects could name a slowest-acceptable cadence and the
+    // host took the slower of that and the policy's. It existed as a cost
+    // lever for effects that never rest — but NO effect in this app rests
+    // (every isAtRest() collapses to isEmpty()), so it was not
+    // distinguishing anything. What it actually did was let one effect
+    // quietly opt out of the policy: the gel asked for 33ms and got 30fps
+    // on a 120Hz display, and the tentacles did the same until it was
+    // noticed.
+    //
+    // Cadence now has one owner, core/PowerPolicy, which runs at the
+    // display's refresh rate and halves it when conserving. An effect that
+    // is too expensive at full rate is too expensive, and the fix is the
+    // effect, not a private cap the policy cannot see.
 
     // --- power ----------------------------------------------------------
 

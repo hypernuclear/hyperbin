@@ -158,10 +158,14 @@ jobs:
 
       - name: Test
         shell: bash
+        working-directory: build
         run: |
-          # The sim check is headless by design, so it runs here as-is.
-          if [ -f build/simtest ]; then build/simtest
-          else build/Release/simtest.exe; fi
+          # The sim checks are headless by design, so they run here as-is.
+          # --output-on-failure prints the failing test's own log; every
+          # test function is registered separately, so a failure names
+          # itself instead of arriving as one line of a single binary's
+          # output.
+          ctest --output-on-failure --build-config Release
 
       # ===== macOS =====
       - name: Install the Developer ID certificate

@@ -16,6 +16,15 @@ endif()
 # submission, or a distro package where the package manager owns updates.
 option(HYPERBIN_AUTO_UPDATE "Include the auto-updater (Sparkle / WinSparkle)" ON)
 
+# The headless test suite. ON everywhere that matters — CI, and any build
+# somebody is going to change code in — and available to turn off because
+# it is the one part of the tree that a packaging run has no use for.
+#
+# Toggle it from the CMake UI: in VS Code, "CMake: Edit CMake Cache (UI)"
+# lists it as a checkbox; reconfiguring is enough to make the test targets
+# and the CTest registrations appear or vanish.
+option(HYPERBIN_BUILD_TESTS "Build the headless test suite" ON)
+
 # --- versions ---------------------------------------------------------------
 #
 # Two numbers, and they do different jobs.
@@ -101,7 +110,7 @@ if(NOT CMAKE_PREFIX_PATH)
     endif()
 endif()
 
-find_package(Qt6 6.11 QUIET COMPONENTS Core Gui Widgets Svg Qml Quick QuickControls2 Quick3D ShaderTools)
+find_package(Qt6 6.11 QUIET COMPONENTS Core Gui Widgets Svg Qml Quick QuickControls2 Quick3D ShaderTools Test)
 if(NOT Qt6_FOUND)
     if(WIN32)
         message(FATAL_ERROR
@@ -123,7 +132,7 @@ if(NOT Qt6_FOUND)
             "have a CMakeUserPresets.json.")
     endif()
 endif()
-find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Widgets Svg Qml Quick QuickControls2 Quick3D ShaderTools)
+find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Widgets Svg Qml Quick QuickControls2 Quick3D ShaderTools Test)
 qt_standard_project_setup(REQUIRES 6.11)
 
 # --- auto-update ------------------------------------------------------------
@@ -180,15 +189,61 @@ set(HYPERBIN_COUNTLY_SERVER "https://analytics.hypernuclear.com" CACHE STRING
     "Countly server URL")
 
 if(HYPERBIN_ANALYTICS)
-    if(NOT EXISTS "${CMAKE_SOURCE_DIR}/third_party/countly-sdk-cpp/CMakeLists.txt")
-        message(FATAL_ERROR
-            "third_party/countly-sdk-cpp is empty. Run:\n"
-            "  git submodule update --init --recursive\n"
-            "or configure with -DHYPERBIN_ANALYTICS=OFF.")
+    # Countly's SDK, fetched rather than demanded.
+    #
+    # It is a submodule, but "run git submodule update --init" is a wall to
+    # walk into on a fresh clone, and it is one the build can step over
+    # itself: it knows where the code lives and which commit it wants.
+    # Three routes, cheapest first, and analytics stays switchable off for
+    # anyone who would rather not have either.
+    set(_hb_countly "${CMAKE_SOURCE_DIR}/third_party/countly-sdk-cpp")
+    # Must match the gitlink recorded for third_party/countly-sdk-cpp. The
+    # submodule route reads that pin from the git index; the download route
+    # cannot, so it is repeated here. Bump both together — the two routes
+    # quietly building different SDKs is worse than either being stale.
+    set(_hb_countly_pin "e34904b9c798024223d1657c69f6bf17cb786db3")
+    set(_hb_countly_fetch OFF)
+
+    if(NOT EXISTS "${_hb_countly}/CMakeLists.txt")
+        find_package(Git QUIET)
+        if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
+            # Say it out loud: the SDK carries vendor submodules of its
+            # own (sqlite, doctest, nlohmann/json — the last of which is a
+            # large repository), so a first configure can sit here for
+            # minutes with nothing on screen. Silence in Qt Creator's
+            # configure pane is indistinguishable from a hang.
+            message(STATUS "countly-sdk-cpp is empty; fetching the submodule and "
+                           "its vendor dependencies — this can take a few "
+                           "minutes the first time")
+            execute_process(
+                COMMAND ${GIT_EXECUTABLE} submodule update --init --recursive
+                        -- third_party/countly-sdk-cpp
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                RESULT_VARIABLE _hb_countly_sm)
+            if(NOT _hb_countly_sm EQUAL 0)
+                message(STATUS "countly-sdk-cpp: submodule init failed (${_hb_countly_sm})")
+            endif()
+        endif()
     endif()
+
+    if(NOT EXISTS "${_hb_countly}/CMakeLists.txt")
+        # No .git to work from — a source archive, or a clone whose
+        # submodule fetch failed. Download the same commit instead.
+        message(STATUS "countly-sdk-cpp: downloading ${_hb_countly_pin}"
+                       " (-DHYPERBIN_ANALYTICS=OFF to skip analytics entirely)")
+        include(FetchContent)
+        # No GIT_SHALLOW: a bare commit SHA cannot be fetched by ref from
+        # most servers, and this pin is a SHA rather than a tag.
+        FetchContent_Declare(countly
+            GIT_REPOSITORY https://github.com/Countly/countly-sdk-cpp.git
+            GIT_TAG        ${_hb_countly_pin})
+        set(_hb_countly_fetch ON)
+    endif()
+
     # Qt already provides HTTP and SHA-256, and this app links both. The
     # SDK's own defaults would drag libcurl and OpenSSL into a menu-bar
-    # app for no gain.
+    # app for no gain. Set BEFORE the SDK is added, whichever route it
+    # arrived by.
     set(COUNTLY_USE_CUSTOM_HTTP   ON  CACHE BOOL "" FORCE)
     set(COUNTLY_USE_CUSTOM_SHA256 ON  CACHE BOOL "" FORCE)
     set(COUNTLY_BUILD_TESTS       OFF CACHE BOOL "" FORCE)
@@ -199,8 +254,23 @@ if(HYPERBIN_ANALYTICS)
     set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
     set(_hb_shared_saved ${BUILD_SHARED_LIBS})
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-    add_subdirectory(third_party/countly-sdk-cpp EXCLUDE_FROM_ALL)
+    if(_hb_countly_fetch)
+        FetchContent_MakeAvailable(countly)
+    else()
+        add_subdirectory(third_party/countly-sdk-cpp EXCLUDE_FROM_ALL)
+    endif()
     set(BUILD_SHARED_LIBS ${_hb_shared_saved} CACHE BOOL "" FORCE)
+
+    # Both routes are network operations, and a failed one leaves a
+    # directory that exists but builds nothing. Say so here rather than
+    # letting it surface as an unresolved link to `countly`.
+    if(NOT TARGET countly)
+        message(FATAL_ERROR
+            "countly-sdk-cpp did not provide a `countly` target.\n"
+            "Fetch it by hand with:\n"
+            "  git submodule update --init --recursive\n"
+            "or build without analytics: -DHYPERBIN_ANALYTICS=OFF")
+    endif()
 endif()
 
 set(HYPERBIN_UPDATE_SOURCES src/update/AppUpdater.h)
@@ -257,6 +327,10 @@ qt_add_executable(hyperbin
     src/platform/StubTrashTarget.cpp
     src/platform/StubTrashTarget.h
     src/platform/LaunchAtLogin.h
+    src/platform/LowPower.h
+    $<$<PLATFORM_ID:Darwin>:src/platform/LowPowerMac.mm>
+    $<$<PLATFORM_ID:Windows>:src/platform/LowPowerWin.cpp>
+    $<$<NOT:$<OR:$<PLATFORM_ID:Darwin>,$<PLATFORM_ID:Windows>>>:src/platform/LowPowerStub.cpp>
     $<$<PLATFORM_ID:Darwin>:src/platform/LaunchAtLoginMac.mm>
     $<$<PLATFORM_ID:Windows>:src/platform/LaunchAtLoginWin.cpp>
     $<$<NOT:$<OR:$<PLATFORM_ID:Darwin>,$<PLATFORM_ID:Windows>>>:src/platform/LaunchAtLoginStub.cpp>
@@ -273,11 +347,16 @@ qt_add_executable(hyperbin
     src/core/EffectRegistry.h
     src/core/DistanceField.cpp
     src/core/DistanceField.h
+    src/core/BinMouth.cpp
     src/core/OozeSim.cpp
+    src/core/TentacleChain.cpp
     src/core/OozeSim.h
     src/effects/FliesEffect.cpp
     src/effects/FliesEffect.h
+    src/effects/IconTexture.cpp
+    src/effects/SpineTexture.cpp
     src/effects/OozeEffect.cpp
+    src/effects/TentacleEffect.cpp
     src/effects/OozeEffect.h
     src/effects/OozeGeometry.cpp
     src/effects/OozeGeometry.h
@@ -305,6 +384,7 @@ qt_add_qml_module(hyperbin
         qml/BinGlyph.qml
         qml/OozeVisual.qml
         qml/OozeEyes.qml
+        qml/TentacleVisual.qml
         qml/Permissions.qml
         qml/Splash.qml
         qml/HyperbinLockup.qml
@@ -360,14 +440,18 @@ qt_add_resources(hyperbin "hyperbin_icons"
         # that silently falls back to the system UI face on every machine
         # but the one it was designed on is not a brand.
         resources/Inter-SemiBold.ttf
-        # The eyeballs in the goo. Converted from a glTF with balsam;
-        # see docs/effects.md. The source model's cornea is a second,
+        # The eyeballs in the goo. Converted from a glTF with balsam — see
+        # "Bringing in a model" in docs/effects.md for the command and what
+        # to keep. The source model's cornea is a second,
         # transparent mesh — left out on purpose, because a transparent
         # PBR shell costs a full extra pass to produce a highlight that
         # is sub-pixel at the size this is drawn.
         resources/meshes/eye.mesh
         resources/maps/eye_albedo.jpg
         resources/maps/eye_normal.png
+        resources/meshes/tentacle.mesh
+        resources/maps/tentacle_albedo.jpg
+        resources/maps/tentacle_normal.jpg
 )
 qt_add_resources(hyperbin "hyperbin_shaders3d"
     PREFIX "/shaders3d"
@@ -377,15 +461,28 @@ qt_add_resources(hyperbin "hyperbin_shaders3d"
         shaders/ooze3d.frag
         shaders/eye3d.vert
         shaders/eye3d.frag
+        shaders/tentacle.vert
+        shaders/tentacle.frag
 )
 
-# Headless swarm check. No GUI, so it runs on CI and under the debugger
-# without a display.
-add_executable(simtest tests/simtest.cpp src/core/FlySim.cpp src/core/OozeSim.cpp
-               src/core/DistanceField.cpp src/app/Settings.cpp)
-target_include_directories(simtest PRIVATE src/core src/app)
-# Gui, not just Core: the distance field is a QImage. It needs no display
-target_link_libraries(simtest PRIVATE Qt6::Core Qt6::Gui)
+# Headless checks. No GUI, so they run on CI and under the debugger without
+# a display.
+#
+# Qt Test, one executable per area, every test function registered with
+# CTest individually — so `ctest -R Tentacle` runs just the solver's checks
+# and a failure names itself instead of being one line of a single binary's
+# output. This replaced a hand-rolled harness whose `return fail(...)`
+# aborted main on the first failure, which meant a broken check hid every
+# check after it.
+#
+# enable_testing() has to be called from THIS file rather than from
+# tests/CMakeLists.txt: CTest only writes a top-level CTestTestfile.cmake
+# for the directory it was enabled in, and `ctest` run from the build root
+# finds nothing without one.
+if(HYPERBIN_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
 
 # Overlay app: no Dock icon, no menu bar. LSUIElement keeps it a
 # background agent driven from the menu-bar item.

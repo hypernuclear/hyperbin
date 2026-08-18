@@ -121,7 +121,7 @@ detected and warned about rather than shipped as a mystery.
 
 ### Verifying step 1
 
-- `simtest` must still pass untouched — it does not know about platforms,
+- `ctest` must still pass untouched — the sims do not know about platforms,
   which is the point. It does.
 - `scripts/binprobe.cpp` is the port of `scripts/dockprobe.mm`: cell
   position, spacing, icon size, monitor DPI, item count, byte size and the
@@ -173,7 +173,7 @@ status; both are re-evaluated together so neither can be forgotten.
 
 ## Step 3 — The swarm architecture is untouched
 
-No code, by design. `simtest` passes unchanged, and the renderer, sim and
+No code, by design. `ctest` passes unchanged, and the renderer, sim and
 shaders took no Windows-specific edits.
 
 Still to check **on screen**, which needs a visible desktop:

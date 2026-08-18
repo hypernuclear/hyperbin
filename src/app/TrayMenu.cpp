@@ -305,6 +305,28 @@ void TrayMenu::build()
     // settings group is conventionally found.
     m_menu->addSeparator();
 
+    // --- low power -------------------------------------------------------
+    // Three states, not a checkbox. "On battery" was the old question and
+    // it was the wrong one: somebody on mains may want this calm, and
+    // somebody unplugged may not want it throttled. Auto is the default
+    // and follows the OS's own Low Power Mode / Battery Saver.
+    QMenu *lowPower = m_menu->addMenu(QStringLiteral("Low Power Mode"));
+    m_lowPowerGroup = new QActionGroup(this);
+    m_lowPowerGroup->setExclusive(true);
+    const struct { const char *label; Settings::LowPower m; } powers[] = {
+        {"Auto", Settings::LowPower::Auto},
+        {"On",   Settings::LowPower::On},
+        {"Off",  Settings::LowPower::Off},
+    };
+    for (const auto &e : powers) {
+        auto *a = lowPower->addAction(QString::fromLatin1(e.label));
+        a->setCheckable(true);
+        a->setData(int(e.m));
+        m_lowPowerGroup->addAction(a);
+    }
+    connect(m_lowPowerGroup, &QActionGroup::triggered, this, [this](QAction *a) {
+        m_settings->setLowPower(Settings::LowPower(a->data().toInt()));
+    });
     // Open at login. Hidden entirely where we have no implementation,
     // rather than shown as a switch that does nothing.
     if (launchAtLogin::supported()) {
@@ -359,6 +381,7 @@ void TrayMenu::syncFromSettings()
     for (QAction *a : m_effectGroup->actions())
         a->setChecked(a->data().toString() == current);
     check(m_densityGroup, int(m_settings->density()));
+    check(m_lowPowerGroup, int(m_settings->lowPower()));
     check(m_thresholdGroup, int(m_settings->threshold()));
 
     // The threshold only means anything in Relative mode, and greying it

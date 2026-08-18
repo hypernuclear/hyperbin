@@ -1,6 +1,7 @@
 #include "app/Settings.h"
 #include "app/TrayMenu.h"
 #include "core/PowerPolicy.h"
+#include "platform/LowPower.h"
 #include "platform/TrashTarget.h"
 #include "render/EffectItem.h"
 #include "update/AppUpdater.h"
@@ -68,6 +69,21 @@ private:
 };
 } // namespace
 namespace {
+/// What to ask the shell for the bin's artwork at.
+///
+/// Twice the rect, so the texture has something in hand when the overlay
+/// is drawn on a retina screen — but never below 256, however small the
+/// icon on screen is. That floor is not about the texture: the mouth of
+/// the bin is FOUND in this image, and it is found by the lip's shading,
+/// which at a 32pt Dock icon is about one pixel of a 64px tile. Measured
+/// on the macOS trash, detection is exact at 512 and at 128 and gives up
+/// at 64 — so the floor sits well clear of where the signal runs out.
+/// See core/BinMouth.
+int binIconSize(const QRect &rect)
+{
+    return qMax(256, int(qMax(rect.width(), rect.height()) * 2));
+}
+
 /// Serves the preview's stand-in for the shell's trash artwork to QML, so
 /// dev mode can draw the bin underneath the overlay the way the Dock
 /// does. Dev only: nothing in the shipping path goes through this.
@@ -202,6 +218,18 @@ int main(int argc, char **argv)
         // conclusions.
         const QString shot = qEnvironmentVariable("HYPERBIN_PREVIEW_SHOT");
         if (!shot.isEmpty()) {
+            // Out of the way. A grab-and-exit run needs the window
+            // rendered, not focused, and this harness gets run dozens of
+            // times in a row while somebody is working in another app —
+            // left alone it steals focus and stacks on top every single
+            // time. Qt's own flags are not enough on macOS, where
+            // activation belongs to the application rather than the
+            // window, so the native side does the rest.
+            win->setFlags(win->flags() | Qt::WindowDoesNotAcceptFocus
+                          | Qt::WindowStaysOnBottomHint);
+#if defined(Q_OS_MACOS)
+            configurePreviewWindow(win);
+#endif
             // HYPERBIN_PREVIEW_SHOT_MS moves the grab in time. Two grabs
             // at different moments is the only way to tell an animation
             // that is running from one that is merely present in the
@@ -330,7 +358,7 @@ int main(int argc, char **argv)
         // Full and empty are different artwork; refresh when it flips.
         const QRect ir = target->iconRect();
         if (!ir.isEmpty())
-            fx->setBinIcon(target->iconImage(int(qMax(ir.width(), ir.height()) * 2)));
+            fx->setBinIcon(target->iconImage(binIconSize(ir)));
         if (n > 0)
             power.setEffectIdle(false);
     });
@@ -361,7 +389,7 @@ int main(int argc, char **argv)
         // composited over the swarm. This only works because iconRect()
         // now reports the artwork's true bounds rather than the
         // Accessibility hit area — see visualIconRect().
-        fx->setBinIcon(target->iconImage(int(qMax(r.width(), r.height()) * 2)));
+        fx->setBinIcon(target->iconImage(binIconSize(r)));
     });
 
     // HYPERBIN_DEBUG=1 reports where the overlay thinks it is. Kept because
@@ -650,24 +678,114 @@ int main(int argc, char **argv)
     // Off means genuinely off: no frames, no overlay surface, and the
     // trash poll stopped as well. Leaving the poll running would be a
     // background app doing work the user has just told it not to do.
-    auto applyEnabled = [&](bool on) {
-        power.setEnabled(on);
-        if (on) {
-            target->start();
-            power.setBinEmpty(target->itemCount() == 0);
-            applyTargetVisible();
-        } else {
-            target->stop();
-            if (win)
-                win->setVisible(false);
+    // Switching off asks the effect to LEAVE, then tears everything down
+    // once it has gone. There is exactly one teardown and nothing else
+    // touches the window, the poll or the power policy on the way out.
+    //
+    // The first attempt deferred only the window and the trash poll while
+    // still calling power.setEnabled(false) immediately, which was wrong
+    // twice over: the policy's own signal hides the window synchronously,
+    // so the surface vanished anyway — and with the policy off there are
+    // no frames, so the exit animation could not have run even if it had
+    // stayed. Anything that stops the clock has to wait for the clock's
+    // last job to finish.
+    // --- low power ---------------------------------------------------------
+    // The menu's three-way choice, resolved against what the OS is doing.
+    // This is the only place the two are combined; PowerPolicy is handed a
+    // single already-decided answer.
+    //
+    // Both inputs were previously never wired at all — setOnBattery and
+    // setLowPowerMode existed, were read by the policy, and had no callers
+    // — so the documented promise in docs/battery.md that the rate halves
+    // on battery and stops in Low Power Mode did nothing whatsoever.
+    auto *lowPowerWatch = new LowPowerWatch(&app);
+    auto applyLowPower = [&] {
+        bool conserve = false;
+        switch (settings.lowPower()) {
+        case Settings::LowPower::On:   conserve = true; break;
+        case Settings::LowPower::Off:  conserve = false; break;
+        case Settings::LowPower::Auto: conserve = lowPowerWatch->active(); break;
         }
+        power.setLowPower(conserve);
+    };
+    QObject::connect(&settings, &Settings::lowPowerChanged, &app,
+                     [&](Settings::LowPower) { applyLowPower(); refreshStatus(); });
+    QObject::connect(lowPowerWatch, &LowPowerWatch::activeChanged, &app,
+                     [&](bool) { applyLowPower(); refreshStatus(); });
+    applyLowPower();
+
+    // The display's own rate, so a 120Hz screen is animated at 120Hz. It
+    // follows the window, because dragging the Dock to a second monitor
+    // changes the answer.
+    auto applyRefresh = [&] {
+        if (win && win->screen())
+            power.setRefreshHz(win->screen()->refreshRate());
+    };
+    if (win) {
+        QObject::connect(win, &QWindow::screenChanged, &app,
+                         [&](QScreen *) { applyRefresh(); });
+        applyRefresh();
+    }
+
+    auto *exitTimer = new QTimer(&app);
+    exitTimer->setSingleShot(true);
+
+    auto teardown = [&, exitTimer] {
+        exitTimer->stop();
+        power.setEnabled(false);
+        target->stop();
+        if (win)
+            win->setVisible(false);
 #if defined(Q_OS_WIN)
         // Off means off: the occlusion hook and its poll go too, rather
         // than sitting there answering a question nothing is asking.
-        desktop.setEnabled(on);
+        desktop.setEnabled(false);
 #endif
         refreshStatus();
         refreshProblem();
+    };
+    QObject::connect(exitTimer, &QTimer::timeout, &app, teardown);
+    QObject::connect(fx, &EffectItem::becameEmpty, &app, [&, exitTimer] {
+        // Only ever consumed while an exit is in flight. The bin going
+        // empty on its own is not a reason to shut anything down.
+        if (exitTimer->isActive())
+            teardown();
+    });
+
+    auto applyEnabled = [&, exitTimer](bool on) {
+        if (on) {
+            exitTimer->stop();
+            power.setEnabled(true);
+            target->start();
+            power.setBinEmpty(target->itemCount() == 0);
+            // PUT THE FULLNESS BACK. Switching off empties the effect so
+            // it has something to leave from, and nothing else ever
+            // restores it — density is re-applied when the settings or the
+            // bin's contents change, and neither happens by toggling this.
+            // So the effect came back on to an empty bin and stayed empty,
+            // and the only way out was to switch effects, which rebuilds
+            // from scratch. Cheap to call and idempotent.
+            applyDensity();
+            applyTargetVisible();
+#if defined(Q_OS_WIN)
+            desktop.setEnabled(true);
+#endif
+            refreshStatus();
+            refreshProblem();
+        } else if (fx->isEmpty()) {
+            // Nothing on screen to leave. Go straight out rather than
+            // holding the clock open for an animation with no subject.
+            teardown();
+        } else {
+            // Everything stays running so the effect can play its exit —
+            // the policy above all, because it owns the frames. The cap is
+            // a backstop against an effect that never reports empty, not a
+            // duration: the tentacles' own withdrawal runs about 1.4s.
+            fx->setFullness(0.0);
+            exitTimer->start(2000);
+            refreshStatus();
+            refreshProblem();
+        }
     };
     QObject::connect(&settings, &Settings::enabledChanged, &app,
                      [&](bool on) { applyEnabled(on); });

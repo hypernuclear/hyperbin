@@ -64,6 +64,28 @@ void configureOverlayWindow(QWindow *w)
                            | NSWindowCollectionBehaviorFullScreenAuxiliary;
 }
 
+void configurePreviewWindow(QWindow *w)
+{
+    if (!w)
+        return;
+    w->create();
+    NSView *view = reinterpret_cast<NSView *>(w->winId());
+    NSWindow *win = view.window;
+    if (!win)
+        return;
+    // Below normal windows, and never the key window. Both are needed:
+    // the level keeps it visually out of the way, and refusing key status
+    // is what stops keystrokes being swallowed mid-render.
+    win.level = kCGDesktopWindowLevel + 1;
+    win.hidesOnDeactivate = NO;
+    win.animationBehavior = NSWindowAnimationBehaviorNone;
+    win.collectionBehavior = NSWindowCollectionBehaviorIgnoresCycle
+                           | NSWindowCollectionBehaviorCanJoinAllSpaces;
+    [win setCanHide:NO];
+    // Order in at the back rather than making it front. orderFront: would
+    // undo the level for as long as the app is active.
+    [win orderBack:nil];
+}
 void activateApp()
 {
     [NSApp activateIgnoringOtherApps:YES];

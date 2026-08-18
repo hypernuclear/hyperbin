@@ -76,6 +76,15 @@ private:
     // Dock during magnification.
     static constexpr int kFastPollMs = 16;
     static constexpr int kSlowPollMs = 1000;
+    /// How far the icon must move before the overlay follows it, pixels.
+    ///
+    /// One. The Dock does not keep its items on integer pixels and hovering
+    /// nudges the layout, so the rounded rect flips between two neighbouring
+    /// values — and each flip moves the overlay window, which reads as the
+    /// effect shivering against an icon that is standing still. A pixel of
+    /// lag cannot be seen; a pixel of shimmer at 60Hz is the first thing
+    /// you see. Position only: see the emit in pollIconRect.
+    static constexpr int kRectDeadbandPx = 1;
 
     QTimer    m_poll;
     QTimer    m_permissionWatch; // runs only while waiting to be granted

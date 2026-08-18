@@ -1,0 +1,44 @@
+{
+  // F5 is the wrong key for this, and that is a VS Code fact rather than a
+  // configuration mistake: "Start Debugging" launches the DEBUG TARGET —
+  // one executable, chosen in the CMake status bar — and `check` is a
+  // custom target with no executable to launch. With cmake.buildBeforeRun
+  // on, F5 builds first, which is why the test binaries appear and nothing
+  // seems to run them.
+  //
+  // Three things that DO run them:
+  //   * the Testing panel (flask in the activity bar) — per-test, with
+  //     pass/fail beside each one. This is the one to use.
+  //   * Terminal > Run Test Task, which runs the task below
+  //   * selecting `check` as the BUILD target, then Build (Cmd-Shift-B)
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run tests (ctest)",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "--build",
+        "${command:cmake.buildDirectory}",
+        "--target",
+        "check"
+      ],
+      // Marks this as THE test task, so Terminal > Run Test Task picks it
+      // with no further prompting — and so it can be bound to a key:
+      // Preferences > Keyboard Shortcuts, "Tasks: Run Test Task".
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      // Always show it. A test run that reports only on failure is
+      // indistinguishable from one that never started, which is the exact
+      // confusion this file exists to end.
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}

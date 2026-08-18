@@ -42,9 +42,28 @@ actually matters (1) to optimise the thing that doesn't (4).
 - **Stop when nobody can see it**: display asleep, screen locked,
   session switched, a fullscreen app covering the target, the Dock
   auto-hidden, the desktop not the foreground (Windows).
-- **Halve the rate on battery**, and stop entirely in Low Power Mode /
-  Battery Saver. Users forgive a paused novelty; they do not forgive
-  battery drain, and it is the top uninstall reason for this app class.
+- **Run at the display's refresh rate**, and halve to 30fps when
+  conserving. A 120Hz screen gets 120Hz; the old fixed 16ms cap meant it
+  did not. Frame cadence is still the dominant cost, which is why the
+  conserving path exists at all — users forgive a slower novelty, they do
+  not forgive battery drain, and it is the top uninstall reason for this
+  app class.
+
+  **Conserving is the user's call, not the battery's.** "On battery" was
+  the original rule and it was the wrong question: somebody on mains may
+  want the thing calm and somebody unplugged may not want it throttled
+  behind their back. The menu offers Low Power Mode > On / Off / Auto, and
+  Auto follows the OS — `NSProcessInfo.isLowPowerModeEnabled` on macOS,
+  Battery Saver via `GetSystemPowerStatus` on Windows. `src/platform/
+  LowPower.h` is the one place that reads it; `PowerPolicy` is handed a
+  single already-decided boolean.
+
+  Worth knowing why this is written so emphatically: for most of this
+  file's life the policy had `setOnBattery` and `setLowPowerMode`, read
+  both, and **nothing ever called either of them**. Everything above was
+  true as documentation and false as behaviour — full rate on battery,
+  Low Power Mode ignored. An input nobody feeds is worse than no input,
+  because it reads like a feature.
 - **Small dirty region.** The overlay window is sized to the trash icon
   plus a flight margin, nothing more.
 

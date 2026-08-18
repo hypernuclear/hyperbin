@@ -1,5 +1,7 @@
 #include "EffectItem.h"
 
+#include "BinMouth.h"
+
 #include "../core/EffectRegistry.h"
 
 #include <QCursor>
@@ -213,6 +215,14 @@ void EffectItem::rebuildSurface()
     }
     m_effect->setSurface(cov, kCoverage, kCoverage);
     m_effect->setContentLine(detectContentLine());
+    // The opening, measured off the FULL-resolution artwork rather than
+    // the coverage grid: the lip is a shading edge a few pixels thick,
+    // and the grid is 1-bit alpha at a fraction of the size. It would not
+    // survive either conversion.
+    const BinMouth mouth = measureBinMouth(m_binIcon);
+    m_effect->setMouth(mouth);
+    m_mouth = mouth;
+    emit mouthChanged();
 }
 
 float EffectItem::detectContentLine() const
@@ -261,27 +271,16 @@ void EffectItem::setFrameIntervalMs(int ms)
 }
 void EffectItem::applyFrameInterval()
 {
-    // The policy decides whether to draw at all; the effect may ask to be
-    // drawn less often when we do. Only ever slower, never faster — 0
-    // still means stop.
-    //
-    // Recomputed from the REQUEST every time, and re-run whenever the
-    // effect changes. Folding the effect's floor straight into the stored
-    // interval meant it outlived the effect that asked for it: ooze wants
-    // 33ms, the policy wants 16, and the policy only signals when its own
-    // answer moves — so switching from ooze to flies left the flies
-    // running at half rate until something unrelated happened to change
-    // the power state.
-    int ms = m_requestedMs;
-    if (ms > 0 && m_effect)
-        ms = qMax(ms, m_effect->preferredFrameIntervalMs());
+    // ONE source of truth. The policy decides both whether to draw and how
+    // fast; this used to take the slower of that and a per-effect floor,
+    // which let an effect opt out of the policy without the policy knowing
+    // — see the note in core/Effect.h for why that is gone.
+    const int ms = m_requestedMs;
     if (ms == m_intervalMs)
         return;
     m_intervalMs = ms;
     if (qEnvironmentVariableIsSet("HYPERBIN_DEBUG"))
-        qInfo("hyperbin: clock %dms (policy asked %d, '%s' floor %d)", ms,
-              m_requestedMs, qPrintable(m_effectId),
-              m_effect ? m_effect->preferredFrameIntervalMs() : 0);
+        qInfo("hyperbin: clock %dms for '%s'", ms, qPrintable(m_effectId));
 
     if (ms <= 0) {
         m_clock.stop();          // no timer, no wakeups, no frames
@@ -331,6 +330,20 @@ void EffectItem::tick()
 
 QPointF EffectItem::cursorLocal() const
 {
+    // Dev harness: HYPERBIN_PREVIEW_CURSOR=x,y pins the pointer, in this
+    // item's own coordinates. A grab-and-exit preview cannot move the real
+    // mouse, so anything that reacts to the pointer is otherwise
+    // untestable without sitting in front of the app waving at it — which
+    // is exactly the kind of "looks about right" verification that has
+    // been wrong twice in this file already.
+    static const QPointF pinned = [] {
+        const QStringList v = qEnvironmentVariable("HYPERBIN_PREVIEW_CURSOR")
+                                  .split(QLatin1Char(','), Qt::SkipEmptyParts);
+        return v.size() == 2 ? QPointF(v[0].toDouble(), v[1].toDouble())
+                             : QPointF(qQNaN(), qQNaN());
+    }();
+    if (!qIsNaN(pinned.x()))
+        return pinned;
     return mapFromGlobal(QPointF(QCursor::pos()));
 }
 

@@ -25,7 +25,7 @@ Window {
     color: windowedMode ? "#cfcac2"
                         : (paintDebug ? "#80ff0000" : "transparent")
     width: 480
-    height: 480
+    height: 540
     visible: windowedMode
 
     // The bin itself, UNDER the overlay — the position the shell draws it
@@ -59,6 +59,51 @@ Window {
         border.width: 1
     }
 
+    // The measured mouth, drawn over the artwork it was measured from.
+    //
+    // --binmouth only. This is the one thing in the app whose correctness
+    // cannot be judged from the effect that uses it: a tentacle masked
+    // against a mouth ten pixels too low looks like a tentacle that is
+    // slightly wrong, not like a mouth that is. Drawn on the icon, a
+    // wrong answer is obvious in one screenshot.
+    Item {
+        id: mouthDebug
+        visible: windowedMode
+                 && Qt.application.arguments.indexOf("--binmouth") >= 0
+        x: flies.binRect.x
+        y: flies.binRect.y
+        width: flies.binRect.width
+        height: flies.binRect.height
+
+        Rectangle {
+            // The opening. Ellipse via a rounded rectangle: radius at half
+            // the smaller side IS an ellipse, and this needs no Shape.
+            x: (flies.mouthCentre.x - flies.mouthHalfWidth) * parent.width
+            y: (flies.mouthCentre.y - flies.mouthDepth) * parent.height
+            width: flies.mouthHalfWidth * 2 * parent.width
+            height: flies.mouthDepth * 2 * parent.height
+            radius: Math.min(width, height) / 2
+            color: "transparent"
+            border.color: flies.mouthMeasured ? "#ff3030" : "#ffb020"
+            border.width: 2
+        }
+        Rectangle {
+            // The near lip: what an emerging shape has to pass behind.
+            y: (flies.mouthCentre.y + flies.mouthDepth) * parent.height
+            width: parent.width
+            height: 1
+            color: "#30dd50"
+        }
+        Text {
+            y: (flies.mouthCentre.y + flies.mouthDepth) * parent.height + 4
+            color: "#207030"
+            font.pixelSize: 11
+            text: (flies.mouthMeasured ? "measured" : "FALLBACK")
+                  + "  near " + flies.mouthCentre.y.toFixed(3) + "+"
+                  + flies.mouthDepth.toFixed(3)
+        }
+    }
+
     EffectItem {
         id: flies
         objectName: "effect"
@@ -71,7 +116,11 @@ Window {
                 // Big, so an effect can be judged. The overlay's real
                 // margins are proportional to the icon, so this is the
                 // same geometry the Dock produces, just larger.
-                binRect = Qt.rect(90, 40, 300, 300);
+                // Headroom above for anything that reaches OUT of the
+                // bin — tentacles clear the rim by about a fifth of the
+                // icon and were being clipped by the window. The room
+                // below is unchanged, which the ooze needs for its drips.
+                binRect = Qt.rect(90, 100, 300, 300);
                 // HYPERBIN_PREVIEW_FULL pins the slider, so anything that
                 // scales with fullness — the ooze's level, how many eyes
                 // surface — can be shot at a chosen value instead of
@@ -80,8 +129,27 @@ Window {
                                   ? Qt.application.arguments[
                                         Qt.application.arguments.indexOf("--full") + 1]
                                   : 0.85);
-                frameIntervalMs = 16;
+                // --interval <ms> pins the clock, so the cost of a given
+                // cadence can be measured instead of argued about.
+                const ii = Qt.application.arguments.indexOf("--interval");
+                frameIntervalMs = ii >= 0
+                    ? Number(Qt.application.arguments[ii + 1]) : 16;
             }
+        }
+
+        // Dev harness: --empty-at <ms> empties the bin at a chosen moment,
+        // so anything that only happens on the way OUT can be shot.
+        // Without it a grab-and-exit run can never see a withdrawal at
+        // all, which is how a leaving animation ends up shipped on the
+        // strength of "it looked right when I dragged the slider".
+        readonly property int emptyAt: {
+            const i = Qt.application.arguments.indexOf("--empty-at");
+            return i >= 0 ? Number(Qt.application.arguments[i + 1]) : 0;
+        }
+        Timer {
+            running: windowedMode && flies.emptyAt > 0
+            interval: Math.max(1, flies.emptyAt)
+            onTriggered: flies.fullness = 0
         }
     }
 

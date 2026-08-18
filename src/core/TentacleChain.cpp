@@ -1,5 +1,6 @@
 #include "TentacleChain.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace hyperbin {
@@ -125,6 +126,80 @@ void TentacleChain::limitBend(float maxBend)
     }
 }
 
+void TentacleChain::curlUp(const QVector3D &base, const QVector3D &emerge,
+                           float turn, float blend)
+{
+    if (blend <= 0.0f)
+        return;
+    // Which plane to coil in: the arm's own current bend, so it rolls the
+    // way it was already going rather than snapping into some world axis.
+    const QVector3D t0 = dir(m_p[1] - m_p[0], dir(emerge, QVector3D(0, 1, 0)));
+    QVector3D axis = QVector3D::crossProduct(t0, m_p[kJoints - 1] - m_p[0]);
+    if (axis.lengthSquared() < 1e-8f)
+        axis = QVector3D::crossProduct(t0, QVector3D(0, 0, 1));
+    if (axis.lengthSquared() < 1e-8f)
+        axis = QVector3D::crossProduct(t0, QVector3D(1, 0, 0));
+    axis.normalize();
+    // Walk out from the base turning a little more at every joint. The
+    // ramp is what makes it a roll-up rather than a circle: a constant
+    // turn per joint IS a circle, and a fruit rollup is a spiral, tight at
+    // the middle and open at the outside.
+    QVector3D p = base;
+    QVector3D d = t0;
+    for (int i = 1; i < kJoints; ++i) {
+        const float s = float(i) / float(kJoints - 1);
+        // s^1.5 rather than s^2. The steeper ramp put nearly all of the
+        // turning into the last few joints, which hit the bend limit and
+        // stopped, so the total came out well under a full circle however
+        // high `turn` went. A gentler ramp spreads the same total over
+        // more joints and actually closes the spiral.
+        const float a = turn * s * std::sqrt(s);
+        // Rotate d about axis by a — Rodrigues, with d perpendicular to
+        // axis by construction so the parallel term drops out.
+        const QVector3D perp = QVector3D::crossProduct(axis, d);
+        d = dir(d * std::cos(a) + perp * std::sin(a), d);
+        p += d * m_seg;
+        m_p[i] += (p - m_p[i]) * blend;
+    }
+}
+void TentacleChain::settle(const QVector3D &base, const QVector3D &emerge,
+                           float maxBend)
+{
+    constrain(base, maxBend);
+    holdRoot(base, emerge);
+    buildFrames();
+}
+void TentacleChain::pushOutside(float topY, float binHeight, float halfX,
+                                float halfZ, float taper, int fromJoint)
+{
+    for (int i = std::max(1, fromJoint); i < kJoints; ++i) {
+        const float y = m_p[i].y();
+        if (y >= topY)
+            continue;   // in the opening, where it belongs
+        const float below = std::clamp((topY - y) / std::max(binHeight, 1e-4f),
+                                       0.0f, 1.0f);
+        const float sx = halfX * (1.0f + (taper - 1.0f) * below);
+        const float sz = halfZ * (1.0f + (taper - 1.0f) * below);
+        const float ex = m_p[i].x() / std::max(sx, 1e-4f);
+        const float ez = m_p[i].z() / std::max(sz, 1e-4f);
+        const float r = std::sqrt(ex * ex + ez * ez);
+        if (r >= 1.0f)
+            continue;   // already outside
+        // Out along the shortest route in the ellipse's own space, which
+        // for a near-circular section is near enough the true nearest
+        // point and costs one square root instead of a quartic solve.
+        // Biased FORWARD when a joint is close to the axis: dead centre
+        // there is no shortest direction, and toward the camera is the one
+        // that reads as the arm being in front rather than beside.
+        if (r < 1e-3f) {
+            m_p[i].setZ(sz * 1.02f);
+        } else {
+            const float k = 1.02f / r;
+            m_p[i].setX(m_p[i].x() * k);
+            m_p[i].setZ(m_p[i].z() * k);
+        }
+    }
+}
 void TentacleChain::holdRoot(const QVector3D &base, const QVector3D &emerge)
 {
     // Pull the first joints back onto the line the arm leaves its hole

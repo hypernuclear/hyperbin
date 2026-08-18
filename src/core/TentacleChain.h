@@ -47,6 +47,20 @@ public:
     /// Enough for one and a half turns, for the moves that curl right up.
     static constexpr float kCoilBend = 0.62f;   // 35 degrees
 
+    /// How many joints the hole grips.
+    ///
+    /// FABRIK anchors the base POSITION and nothing else, so an arm asked
+    /// for something far to one side satisfies it by swinging everything
+    /// including its first segment — the anchor stays put but the arm
+    /// leaves it at a new angle, and what the eye reads as "the base" is
+    /// the first visible stretch, not the anchored point. Wrapping round
+    /// the bin looked like the whole tentacle sliding around the rim.
+    ///
+    /// Holding four of sixteen is about a quarter of the arm, which is
+    /// roughly what is buried in the rubbish and passing through the
+    /// opening — the part that physically could not swing.
+    static constexpr int kRootHeld = 4;
+
 
     /// Straighten the arm out from `base` along `dir`, `length` long.
     /// Called once, and again if the bin resizes — never per frame, or the
@@ -67,7 +81,39 @@ public:
     void solve(const QVector3D &base, const QVector3D &emerge,
                const QVector3D &target,
                float time, float phase, float flex, float maxBend);
+    /// Blend the solved chain toward a SPIRAL, tightening toward the tip.
+    ///
+    /// A separate pass and not another target, because no single target
+    /// can ask for this. FABRIK is told where to put the tip and finds
+    /// some pose that does it; a roll-up is a statement about CURVATURE
+    /// ALONG the arm — nearly straight at the base, tightest at the very
+    /// end — which is a property of every joint at once and invisible to
+    /// a solver that only sees the endpoint.
+    ///
+    /// `turn` is the bend per joint at the tip, radians. `blend` fades the
+    /// whole thing in, so a move can roll up and unroll.
+    void curlUp(const QVector3D &base, const QVector3D &emerge,
+                float turn, float blend);
+    /// Keep the chain OUT of the bin's body.
+    ///
+    /// FABRIK knows about lengths and nothing else, so the straight route
+    /// from a root in the rubbish to a target down by the foot goes
+    /// through the bin. The mask then correctly hides the buried stretch,
+    /// and the arm appears as a floating fragment with a gap where its
+    /// middle should be. Pushing joints out to the nearest surface is what
+    /// makes an arm go OVER the rim to get down the outside, which is what
+    /// it would have to do.
+    ///
+    /// The body is an upright elliptical cylinder from `topY` down,
+    /// narrowing to `taper` of its width at a bin height below. Joints
+    /// above `topY` are left alone: that is the opening, and an arm is
+    /// supposed to be in it.
+    void pushOutside(float topY, float binHeight, float halfX, float halfZ,
+                     float taper, int fromJoint);
 
+    /// Re-fix lengths, bends and the root, and rebuild the frames. For
+    /// callers that have moved joints themselves.
+    void settle(const QVector3D &base, const QVector3D &emerge, float maxBend);
     bool valid() const { return m_seg > 0.0f; }
     float length() const { return m_seg * float(kJoints - 1); }
 
@@ -83,19 +129,6 @@ private:
     void constrain(const QVector3D &base, float maxBend);
     void limitBend(float maxBend);
     void holdRoot(const QVector3D &base, const QVector3D &emerge);
-    /// How many joints the hole grips.
-    ///
-    /// FABRIK anchors the base POSITION and nothing else, so an arm asked
-    /// for something far to one side satisfies it by swinging everything
-    /// including its first segment — the anchor stays put but the arm
-    /// leaves it at a new angle, and what the eye reads as "the base" is
-    /// the first visible stretch, not the anchored point. Wrapping round
-    /// the bin looked like the whole tentacle sliding around the rim.
-    ///
-    /// Holding four of sixteen is about a quarter of the arm, which is
-    /// roughly what is buried in the rubbish and passing through the
-    /// opening — the part that physically could not swing.
-    static constexpr int kRootHeld = 4;
     void applyWave(float time, float phase, float flex);
     void buildFrames();
 

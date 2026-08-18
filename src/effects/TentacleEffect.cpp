@@ -99,11 +99,37 @@ void TentacleEffect::step(float dt)
     // Velocity first, then position — semi-implicit, which stays stable
     // at the frame intervals this runs at where the explicit form would
     // not.
+    // The withdrawal's own clock. Starts when the bin is asked to empty
+    // and something is still out; cleared the moment it refills, so a bin
+    // that fills again mid-retreat simply carries on rather than finishing
+    // a flourish nobody asked for.
+    if (m_target <= 0.0f && m_level > 0.005f) {
+        if (m_retreat < 0.0f)
+            m_retreat = 0.0f;
+        m_retreat += dt;
+    } else if (m_target > 0.0f) {
+        m_retreat = -1.0f;
+    }
     constexpr float kEmergeEase = 2.6f;
     constexpr float kWithdrawEase = 4.4f;
     const float omega = m_target > m_level ? kEmergeEase : kWithdrawEase;
-    m_vel += (omega * omega * (m_target - m_level) - 2.0f * omega * m_vel) * dt;
-    m_level += m_vel * dt;
+    // Frozen for as long as the arms are still making a show of leaving.
+    // Letting the spring run underneath would drop the arm count out from
+    // under the flourish and they would vanish one at a time mid-thrash.
+    const bool holding = m_retreat >= 0.0f && m_retreat < kRetreatHold;
+    if (m_retreat >= kRetreatAll) {
+        // The flourish is over and the arms are under the rubbish, so the
+        // level has no more work to do. Snapped rather than left to the
+        // spring: the spring took another 0.8s to crawl the last of the
+        // way, during which nothing was visible and isEmpty() was still
+        // false, so the whole exit measured 1.9s for 1.1s of animation and
+        // the teardown's own backstop fired before it finished.
+        m_level = 0.0f;
+        m_vel = 0.0f;
+    } else if (!holding) {
+        m_vel += (omega * omega * (m_target - m_level) - 2.0f * omega * m_vel) * dt;
+        m_level += m_vel * dt;
+    }
     // A spring approaches asymptotically and would keep the clock
     // running forever chasing the last thousandth. Close and slow is
     // arrived — and it has to actually arrive, because reaching zero is
@@ -139,12 +165,27 @@ static float smooth(float t)
     return t * t * (3.0f - 2.0f * t);
 }
 
+QVector3D TentacleEffect::armEmerge(int i) const
+{
+    const Seat &seat = kSeats[i];
+    return QVector3D(std::sin(seat.strike) * 0.22f, 1.0f,
+                     std::cos(seat.strike) * 0.10f).normalized();
+}
 QVector3D TentacleEffect::armBase(int i) const
 {
     const Seat &seat = kSeats[i];
-    return QVector3D(mouthX() + seat.lateral * mouthRadius(),
-                     rootY(),
-                     seat.depth * mouthReachZ());
+    const float binH = float(m_binSize.height());
+    const float sa = armHash(float(i), 5.0f);
+    // Slid along the arm's OWN axis, not sideways. Two rates that do not
+    // divide into each other, so an arm never returns to the same
+    // extension twice; the slower one is the breath and the quicker one is
+    // what makes it read as slithering rather than rising.
+    const float slide = 0.60f * std::sin(m_time * 0.52f + sa * 6.28318531f)
+                      + 0.40f * std::sin(m_time * 1.27f + sa * 3.11f);
+    const QVector3D root(mouthX() + seat.lateral * mouthRadius(),
+                         rootY() - seat.sink * binH,
+                         seat.depth * mouthReachZ());
+    return root + armEmerge(i) * (slide * kRootSlide * binH);
 }
 float TentacleEffect::moveProgress(int i) const
 {
@@ -177,9 +218,12 @@ void TentacleEffect::advanceMove(int i, float dt)
     } else if (r < 0.78f) {
         st.move = Move::Coil;
         st.duration = 2.4f + 1.2f * st.seed;
-    } else if (r < 0.90f) {
+    } else if (r < 0.79f) {
         st.move = Move::Wrap;
         st.duration = 3.0f + 1.5f * st.seed;
+    } else if (r < 0.93f) {
+        st.move = Move::Roll;
+        st.duration = 3.2f + 1.4f * st.seed;
     } else {
         st.move = Move::Idle;
         st.duration = 1.8f + 2.2f * st.seed;
@@ -227,7 +271,13 @@ QVector3D TentacleEffect::armTarget(int i, float &flex, float &maxBend) const
         // Sideways reach scaled to the BIN, not to the arm. Scaled to the
         // arm it was 290 units on a bin only 160 deep, so an idle wave
         // carried the tip clear past the bin's own footprint.
-        + out * (mouthRadius() * (1.00f + 0.35f * std::sin(m_time * 0.31f + sb * 6.28f)));
+        // Modest, because clamping the TARGET is not enough on its own:
+        // the chain bows, so a tip pulled back to the rim still leaves the
+        // arm's middle swinging well outside it. Measured with the target
+        // clamped to 1.18 opening-radii, arms still overhung the artwork
+        // by up to 219px on a 444px bin. The reach has to be smaller at
+        // source, not corrected afterwards.
+        + out * (mouthRadius() * (0.36f + 0.16f * std::sin(m_time * 0.31f + sb * 6.28f)));
     // Where the pointer is, in scene units, and how much to care.
     //
     // CONTINUOUS, and that is the fix rather than a tuning: reaching used
@@ -260,9 +310,24 @@ QVector3D TentacleEffect::armTarget(int i, float &flex, float &maxBend) const
     case Move::Slap: {
         // Out fast, held, drawn back slowly -- the asymmetry is the whole
         // of what makes it read as a hit rather than a wave.
-        const float hit = u < 0.18f ? smooth(u / 0.18f)
-                        : u < 0.30f ? 1.0f
-                        : 1.0f - smooth((u - 0.30f) / 0.70f);
+        // Out fast, barely held, snapped back. The hold was 0.12 of the
+        // move and the release took the remaining 0.70, which together
+        // read as the arm being STUCK to the bin for a beat. A hit is
+        // brief contact and a recoil: the arm should leave the wall faster
+        // than it arrived and overshoot on the way out.
+        float hit;
+        if (u < 0.16f)
+            hit = smooth(u / 0.16f);
+        else if (u < 0.22f)
+            hit = 1.0f;
+        else {
+            const float r = (u - 0.22f) / 0.34f;
+            hit = r < 1.0f ? 1.0f - smooth(r) : 0.0f;
+            // Recoil: past the resting pose and back, so the arm rebounds
+            // off the bin rather than merely stopping pushing on it.
+            if (r > 0.55f && r < 1.9f)
+                hit -= 0.22f * std::sin((r - 0.55f) / 1.35f * 3.14159265f);
+        }
         flex = 1.0f - 0.75f * hit;
         // WELL BELOW the contact point, not on it. Aimed AT the wall the
         // arm arrives pointing at it and pokes; aimed at a place further
@@ -311,6 +376,27 @@ QVector3D TentacleEffect::armTarget(int i, float &flex, float &maxBend) const
                                std::cos(turn) * mouthReachZ() * 0.85f);
         return leaned + (around - leaned) * ring;
     }
+    case Move::Roll:
+        // The target barely matters here -- the shape comes from curlUp,
+        // applied after the solve. All this does is keep the arm from
+        // wandering while it rolls.
+        //
+        // The bend limit HAS to come up with it, and this is why the roll
+        // was invisible: curlUp lays a spiral turning up to 0.75 radians a
+        // joint, and the settle pass that follows re-applies the limit --
+        // which was still the default 0.384 -- and quietly straightened
+        // the whole thing back out every frame. The pose was being
+        // computed and then erased.
+        flex = 0.45f;
+        // Tight enough to actually be a roll. At 0.85 the arm managed
+        // about 215 degrees -- a hook, not a spiral. A curl only reads as
+        // rolled up once it passes a full turn, and the limit on how tight
+        // that can get is geometric: the last N segments closing a circle
+        // need 2pi/N per joint, so five joints is 72 degrees each and
+        // anything past that has segments doubling back through their own
+        // neighbours.
+        maxBend = 1.32f;
+        return leaned;
     case Move::Reach: {
         // The full lunge, on top of the lean every arm already has. The
         // pointer arrives in the host item's pixels with +y DOWN and the
@@ -323,11 +409,83 @@ QVector3D TentacleEffect::armTarget(int i, float &flex, float &maxBend) const
     }
     return leaned;
 }
+QVector3D TentacleEffect::retreatTarget(int i, float &flex, float &sink) const
+{
+    const float L = armLength() * kSeats[i].size;
+    const float binH = float(m_binSize.height());
+    const QVector3D base = armBase(i);
+    const float t = m_retreat;
+    // Up. Straight up, at full stretch, whatever it was doing -- the arm
+    // gathers itself before it goes.
+    const float rise = smooth(std::min(t / kRetreatRise, 1.0f));
+    // ...and thrashes there. The wave is what sells it, so this drives the
+    // wave hard rather than moving the target about: a target that shakes
+    // just drags the whole arm, where a fast wave whips its length.
+    const float thrash = t < kRetreatRise ? 0.0f
+                       : smooth(std::min((t - kRetreatRise) / 0.15f, 1.0f))
+                         * (1.0f - smooth(std::max((t - kRetreatHold) / 0.25f, 0.0f)));
+    flex = 1.0f + 5.5f * thrash;
+    // Then down, past the root, out of sight. Eased in so it drops rather
+    // than starting at speed.
+    sink = t <= kRetreatHold ? 0.0f
+         : smooth(std::clamp((t - kRetreatHold) / kRetreatSink, 0.0f, 1.0f));
+    const float wobble = 0.10f * std::sin(m_time * 9.0f + float(i) * 2.1f) * thrash;
+    const QVector3D up = base + QVector3D(wobble * L, L * (0.94f * rise), 0.0f);
+    // Going in, the arm COILS rather than translating. Dropping the whole
+    // chain by its own length does put it out of sight, but out of sight
+    // below the BIN — the mask only covers the artwork's own rectangle, so
+    // an arm pushed through the floor reappears underneath it. Measured,
+    // 26,766 pixels of arm hanging below the bin. Pulling the tip back to
+    // its own root instead gathers the arm into a knot that fits inside
+    // the rubbish, where the mask already hides it.
+    return up + (base - up) * sink;
+}
+QVector3D TentacleEffect::keepNear(const QVector3D &t) const
+{
+    // How far sideways an arm may reach, measured from the bin's AXIS
+    // rather than from the arm's own root. The idle reach was a radius
+    // added to a root that already sat 0.62 of the way out, so the outer
+    // pair could finish nearly two opening-radii from the centre -- well
+    // clear of the artwork, waving at nothing. Clamped, not scaled, so the
+    // arms nearest the middle still get their full travel.
+    const float limit = mouthRadius() * 0.90f;
+    const float r = std::hypot(t.x() - mouthX(), t.z());
+    if (r <= limit || r < 1e-4f)
+        return t;
+    const float k = limit / r;
+    return QVector3D(mouthX() + (t.x() - mouthX()) * k, t.y(), t.z() * k);
+}
+QVector3D TentacleEffect::keepInFront(const QVector3D &t) const
+{
+    // Below the rim there is no "inside the bin" for an arm to reach: it
+    // came out of the opening, so anything lower than the lip has to be
+    // in FRONT of the body. Without this, a reach downward aimed straight
+    // down from the mouth put the tip at the bin's own depth, the mask
+    // correctly decided the front wall was in the way, and the arm
+    // vanished into the bin exactly when it was most visible.
+    //
+    // Faded in over the lip rather than switched at it, so an arm crossing
+    // the rim eases forward instead of jumping.
+    const float binH = float(m_binSize.height());
+    const float under = std::clamp((mouthY() - t.y()) / (binH * 0.12f), 0.0f, 1.0f);
+    const float front = mouthReachZ() * 1.10f;
+    return QVector3D(t.x(), t.y(), std::max(t.z(), front * under));
+}
 float TentacleEffect::binHalfWidthAt(float y) const
 {
     const float binH = float(m_binSize.height());
     const float below = std::clamp((mouthY() - y) / std::max(binH, 1e-4f), 0.0f, 1.0f);
     return mouthRadius() * (kBodyTop + (kBodyFoot - kBodyTop) * below);
+}
+float TentacleEffect::rollAmount(int i) const
+{
+    if (m_state[i].move != Move::Roll)
+        return 0.0f;
+    // In over the first third, held, out over the last quarter, so it
+    // rolls up, sits curled a moment, and unrolls.
+    const float u = moveProgress(i);
+    return smooth(std::min(u / 0.34f, 1.0f))
+         * (1.0f - smooth(std::max((u - 0.76f) / 0.24f, 0.0f)));
 }
 float TentacleEffect::mouthReachZ() const
 {
@@ -356,14 +514,40 @@ void TentacleEffect::updateArms()
             m_chain[i].reset(base, QVector3D(0, 1, 0), want);
         float flex = 1.0f;
         float maxBend = TentacleChain::kMaxBend;
-        const QVector3D target = armTarget(i, flex, maxBend);
+        QVector3D target;
+        float sink = 0.0f;
+        if (m_retreat >= 0.0f) {
+            // Reined in on the way out too. An arm caught mid-wrap was
+            // out beyond the bin when the exit began and stayed there
+            // while it sank, so the last thing on screen was a tentacle
+            // hanging outside the bin rather than going into it.
+            target = keepNear(retreatTarget(i, flex, sink));
+        } else {
+            target = keepInFront(keepNear(armTarget(i, flex, maxBend)));
+        }
         // Leaves the hole going UP and a little outward, whatever it is
         // reaching for. See TentacleChain::kRootHeld.
-        const Seat &seat = kSeats[i];
-        const QVector3D emerge = QVector3D(std::sin(seat.strike) * 0.22f, 1.0f,
-                                           std::cos(seat.strike) * 0.10f).normalized();
-        m_chain[i].solve(base, emerge, target, m_time,
+        const QVector3D emerge = armEmerge(i);
+        // Drawn down into the rubbish on the way out, by a fraction of
+        // the bin rather than by the arm's length -- far enough to be
+        // under the heap, never far enough to come out of the bottom.
+        const QVector3D sunk =
+            base - emerge * (sink * float(m_binSize.height()) * 0.30f);
+        target -= emerge * (sink * float(m_binSize.height()) * 0.30f);
+        // Allowed to fold up tightly while it does, or a straight arm
+        // simply pivots instead of gathering itself in.
+        if (sink > 0.0f)
+            maxBend = TentacleChain::kMaxBend
+                    + (TentacleChain::kCoilBend - TentacleChain::kMaxBend) * sink;
+        m_chain[i].solve(sunk, emerge, target, m_time,
                          armHash(float(i), 3.0f) * 6.28318531f, flex, maxBend);
+        m_chain[i].curlUp(sunk, emerge, 1.30f, rollAmount(i));
+        // Out of the bin, then lengths fixed again -- pushing joints
+        // sideways stretches the segments that reach them.
+        m_chain[i].pushOutside(mouthY(), float(m_binSize.height()),
+                               mouthRadius(), mouthReachZ(), kBodyFoot / kBodyTop,
+                               TentacleChain::kRootHeld + 1);
+        m_chain[i].settle(sunk, emerge, maxBend);
     }
     m_spine->setChains(m_chain, n, kMaxTentacles);
 }
@@ -385,6 +569,8 @@ int TentacleEffect::count() const
 {
     if (isEmpty())
         return 0;
+    if (m_retreat >= 0.0f && m_retreat < kRetreatAll)
+        return kMaxTentacles;
     return std::clamp(int(std::lround(m_level * kMaxTentacles)), 1, kMaxTentacles);
 }
 

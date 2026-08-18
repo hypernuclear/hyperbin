@@ -132,6 +132,21 @@ Window {
                 frameIntervalMs = 16;
             }
         }
+
+        // Dev harness: --empty-at <ms> empties the bin at a chosen moment,
+        // so anything that only happens on the way OUT can be shot.
+        // Without it a grab-and-exit run can never see a withdrawal at
+        // all, which is how a leaving animation ends up shipped on the
+        // strength of "it looked right when I dragged the slider".
+        readonly property int emptyAt: {
+            const i = Qt.application.arguments.indexOf("--empty-at");
+            return i >= 0 ? Number(Qt.application.arguments[i + 1]) : 0;
+        }
+        Timer {
+            running: windowedMode && flies.emptyAt > 0
+            interval: Math.max(1, flies.emptyAt)
+            onTriggered: flies.fullness = 0
+        }
     }
 
     // Dev affordance: drag to feel the swarm grow and agitate.

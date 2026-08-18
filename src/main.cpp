@@ -677,24 +677,76 @@ int main(int argc, char **argv)
     // Off means genuinely off: no frames, no overlay surface, and the
     // trash poll stopped as well. Leaving the poll running would be a
     // background app doing work the user has just told it not to do.
-    auto applyEnabled = [&](bool on) {
-        power.setEnabled(on);
-        if (on) {
-            target->start();
-            power.setBinEmpty(target->itemCount() == 0);
-            applyTargetVisible();
-        } else {
-            target->stop();
-            if (win)
-                win->setVisible(false);
-        }
+    // Switching off asks the effect to LEAVE, then tears everything down
+    // once it has gone. There is exactly one teardown and nothing else
+    // touches the window, the poll or the power policy on the way out.
+    //
+    // The first attempt deferred only the window and the trash poll while
+    // still calling power.setEnabled(false) immediately, which was wrong
+    // twice over: the policy's own signal hides the window synchronously,
+    // so the surface vanished anyway — and with the policy off there are
+    // no frames, so the exit animation could not have run even if it had
+    // stayed. Anything that stops the clock has to wait for the clock's
+    // last job to finish.
+    auto *exitTimer = new QTimer(&app);
+    exitTimer->setSingleShot(true);
+
+    auto teardown = [&, exitTimer] {
+        exitTimer->stop();
+        power.setEnabled(false);
+        target->stop();
+        if (win)
+            win->setVisible(false);
 #if defined(Q_OS_WIN)
         // Off means off: the occlusion hook and its poll go too, rather
         // than sitting there answering a question nothing is asking.
-        desktop.setEnabled(on);
+        desktop.setEnabled(false);
 #endif
         refreshStatus();
         refreshProblem();
+    };
+    QObject::connect(exitTimer, &QTimer::timeout, &app, teardown);
+    QObject::connect(fx, &EffectItem::becameEmpty, &app, [&, exitTimer] {
+        // Only ever consumed while an exit is in flight. The bin going
+        // empty on its own is not a reason to shut anything down.
+        if (exitTimer->isActive())
+            teardown();
+    });
+
+    auto applyEnabled = [&, exitTimer](bool on) {
+        if (on) {
+            exitTimer->stop();
+            power.setEnabled(true);
+            target->start();
+            power.setBinEmpty(target->itemCount() == 0);
+            // PUT THE FULLNESS BACK. Switching off empties the effect so
+            // it has something to leave from, and nothing else ever
+            // restores it — density is re-applied when the settings or the
+            // bin's contents change, and neither happens by toggling this.
+            // So the effect came back on to an empty bin and stayed empty,
+            // and the only way out was to switch effects, which rebuilds
+            // from scratch. Cheap to call and idempotent.
+            applyDensity();
+            applyTargetVisible();
+#if defined(Q_OS_WIN)
+            desktop.setEnabled(true);
+#endif
+            refreshStatus();
+            refreshProblem();
+        } else if (fx->isEmpty()) {
+            // Nothing on screen to leave. Go straight out rather than
+            // holding the clock open for an animation with no subject.
+            teardown();
+        } else {
+            // Everything stays running so the effect can play its exit —
+            // the policy above all, because it owns the frames. The cap is
+            // a backstop against an effect that never reports empty, not a
+            // duration: the tentacles' own withdrawal runs about 1.4s.
+            fx->setFullness(0.0);
+            exitTimer->start(2000);
+            refreshStatus();
+            refreshProblem();
+        }
     };
     QObject::connect(&settings, &Settings::enabledChanged, &app,
                      [&](bool on) { applyEnabled(on); });

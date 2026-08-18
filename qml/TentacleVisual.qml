@@ -215,9 +215,18 @@ Item {
                             // the next sixth — referenced to the crest
                             // itself it would be at full brightness the
                             // instant it became visible.
-                            property real shadeTopY: heapTop + root.binH * 0.10
-                            property real shadeSpan: root.binH * 0.16
-                            property real binShade: 0.30
+                            // Darker, deeper, and reaching further up.
+                            //
+                            // An arm is meant to look like it is coming
+                            // OUT of the rubbish, and the strongest cue
+                            // for that is the light falling off as it goes
+                            // in. At 0.30 over a sixth of the bin the
+                            // gradient was there but too weak and too
+                            // short to read, so the arm looked laid on top
+                            // of the mouth rather than passing through it.
+                            property real shadeTopY: heapTop + root.binH * 0.16
+                            property real shadeSpan: root.binH * 0.26
+                            property real binShade: 0.13
                             // Aerial perspective, from the seat's depth:
                             // -1 at the far lip is dimmed, +1 at the near
                             // one is not.

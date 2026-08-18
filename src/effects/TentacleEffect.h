@@ -144,7 +144,18 @@ public:
 
     bool isEmpty() const override { return m_level <= 0.005f; }
     bool isAtRest() const override { return isEmpty(); }
-    int preferredFrameIntervalMs() const override { return 33; }
+    /// NO OPINION — whatever the power policy says.
+    ///
+    /// This used to return 33, which does not mean "ask for 30fps": the
+    /// host takes qMax(policy, this), so an effect can only ever ask to be
+    /// drawn LESS often. The policy already runs 60fps on mains and halves
+    /// it on battery for everything, so 33 was quietly overriding that to
+    /// 30 on mains as well — and this effect whips, so a strike crossing
+    /// the bin in a fifth of a second was stepping rather than moving.
+    ///
+    /// Zero is the way to say "no floor", and it puts the mains/battery
+    /// decision back where it belongs, in core/PowerPolicy.
+    int preferredFrameIntervalMs() const override { return 0; }
 
     QMargins margins(qreal iconSize) const override;
     QUrl visualSource() const override;
@@ -205,6 +216,7 @@ private:
         float size;     ///< scale for the whole arm, for fake perspective
         float strike;   ///< which way it lashes, radians, 0 = at the camera
         float swing;    ///< how far that direction wanders, radians
+        float sink;     ///< extra root depth, fractions of the bin's height
     };
 
     /// A TRIANGLE, apex at the back — one arm behind two.
@@ -255,9 +267,10 @@ private:
     /// one, and the back arm is a long way behind both.
     static constexpr Seat kSeats[kMaxTentacles] = {
         //  lateral  depth   size   strike  swing
-        {      0.00f, -0.80f, 0.92f,  1.45f, 1.15f },  // back, centre
-        {     -0.62f,  0.12f, 0.78f, -0.75f, 0.28f },  // front left
-        {      0.62f,  0.12f, 0.78f,  0.75f, 0.28f },  // front right
+        //                                                      sink
+        {      0.00f, -0.30f, 0.92f,  1.45f, 1.15f,             0.10f },  // back, centre
+        {     -0.62f,  0.12f, 0.78f, -0.75f, 0.28f,             0.00f },  // front left
+        {      0.62f,  0.12f, 0.78f,  0.75f, 0.28f,             0.00f },  // front right
     };
 
     /// An arm's length, as a fraction of the bin's height.
@@ -275,7 +288,7 @@ private:
     /// nothing left over to come down it. Slack curls looked like a
     /// gesture at the bin rather than a hit on it, and no amount of tuning
     /// the ANGLE could have fixed a length that was short.
-    static constexpr float kArmLength = 1.22f;
+    static constexpr float kArmLength = 1.38f;
 
     /// Where a strike aims, as a share of the opening's half-width.
     ///
@@ -307,18 +320,51 @@ private:
     /// instead of sitting on it.
     /// Lowered from the measured peak of 0.107. That figure is the
     /// NEWSPAPER — the single highest thing in the artwork — and using it
-    /// made the mound as tall as its tallest point everywhere, so the back
-    /// arm stayed hidden until it had climbed clear of all the rubbish and
-    /// then appeared above the lot. Half of it puts the arm among the
-    /// rubbish instead of behind it: some pieces in front, some behind.
-    static constexpr float kHeapRise = 0.052f;
+    /// made the mound as tall as its tallest point everywhere.
+    ///
+    /// It also turned out that SINKING an arm does not make it look lower,
+    /// which is worth writing down because it is counter-intuitive: where
+    /// an arm appears to start is set by where it clears the mound, not by
+    /// where its root is. Burying the back arm deeper only buried more of
+    /// it. What moves the emergence point down is a shallower mound — and
+    /// pulling the arm forward, because the mound is cleared along the
+    /// LINE OF SIGHT, so something further back has to rise higher to get
+    /// over the same mound.
+    static constexpr float kHeapRise = 0.018f;
     static constexpr float kHeapSink = 0.22f;
 
     /// How far below the opening an arm's root starts. Buried, so the arm
     /// comes OUT of the rubbish rather than beginning at its surface, and
     /// no deeper than that — every unit below here is arm that is never
     /// seen.
-    static constexpr float kRootDepth = 0.10f;
+    /// Deepened, and with a per-seat extra on top.
+    ///
+    /// The back arm needed both. It sits 0.8 of the opening away from the
+    /// camera, and moving away from a camera looking DOWN raises you on
+    /// screen — so at the same root height as the others it emerged well
+    /// clear of the rim and floated above the rubbish rather than out of
+    /// it. Its own sink cancels that.
+    ///
+    /// The extra depth all round is what the slither is made of: an arm
+    /// with a length buried has somewhere to come out FROM. See kRootSlide.
+    static constexpr float kRootDepth = 0.20f;
+    /// How far an arm slides in and out along its own axis, as a fraction
+    /// of the bin's height.
+    ///
+    /// This is the movement "along the spine" that was missing. Nothing
+    /// else in the vocabulary changes how much of an arm is OUT — every
+    /// move rearranges a fixed visible length — so the arms read as three
+    /// fixed-length things waving rather than as something living in the
+    /// bin. Sliding the anchor along the emergence axis pushes the arm
+    /// through the mask that is already there, which costs nothing and is
+    /// the one motion the occlusion makes convincing for free.
+    static constexpr float kRootSlide = 0.185f;
+    /// The withdrawal, in seconds: reach up, thrash, then drop.
+    static constexpr float kRetreatRise = 0.26f;
+    static constexpr float kRetreatThrash = 0.42f;
+    static constexpr float kRetreatSink = 0.40f;
+    static constexpr float kRetreatHold = kRetreatRise + kRetreatThrash;
+    static constexpr float kRetreatAll = kRetreatHold + kRetreatSink;
 
     /// What an arm is doing. A vocabulary rather than one parameterised
     /// gesture: three arms all running the same curve with different
@@ -330,6 +376,7 @@ private:
         Slap,   ///< over the rim and down the wall, landing along it
         Coil,   ///< curled up on itself, tip near its own root
         Wrap,   ///< tip travelling round the bin's circumference
+        Roll,   ///< spiralled up on itself like a fruit rollup
         Reach,  ///< after the pointer
     };
     struct ArmState
@@ -352,7 +399,16 @@ private:
     /// Where an arm is rooted, and what it is reaching for, both in scene
     /// units. `hit` is 0 at rest and 1 at full strike.
     QVector3D armBase(int i) const;
+    QVector3D armEmerge(int i) const;
+    /// Push a target in front of the bin if it is below the rim.
+    QVector3D keepInFront(const QVector3D &t) const;
+    /// Clamp a target to within reach of the bin, measured from its axis.
+    QVector3D keepNear(const QVector3D &t) const;
+    /// The leaving flourish: up, thrash, then down out of sight.
+    QVector3D retreatTarget(int i, float &flex, float &sink) const;
     QVector3D armTarget(int i, float &flex, float &maxBend) const;
+    /// How tightly this arm is rolled up right now, 0..1.
+    float rollAmount(int i) const;
 
 
     BinMouth m_mouth;
@@ -364,6 +420,14 @@ private:
     float m_target = 0.0f;
     bool m_wasEmpty = true;
     float m_cameraTilt = 17.0f;
+    /// Seconds into the withdrawal, or -1 when not withdrawing.
+    ///
+    /// A timeline of its own rather than a shape of the level spring,
+    /// because the two want opposite things: the spring's job is to reach
+    /// zero so isEmpty() can go true and the overlay can be torn down, and
+    /// the withdrawal's job is to still be visible while it happens. The
+    /// level is HELD until the flourish is done and only then released.
+    float m_retreat = -1.0f;
     float m_dt = 0.033f;
     /// One per seat, and they PERSIST between frames. That is the point of
     /// a chain: it is solved from where it already was, so it lags its

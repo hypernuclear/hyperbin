@@ -263,4 +263,20 @@ qml/            tray glyph and the ooze's Quick3D scene
 docs/           architecture, the effect contract, battery, Windows,
                 distribution
 ```
+hyperbin's own source — everything under `src/`, `qml/`, `shaders/` and
+`tests/` — is **MIT**. See `LICENSE`.
+What the *binary* may be distributed under is a separate question, and it is
+decided by which Qt it was linked against rather than by anything in this
+repository:
+* **Open-source Qt** — the binary must be distributed under **GPLv3**. Qt
+  Quick 3D is GPLv3-or-commercial with no LGPLv3 option, and the ooze and
+  the tentacles are both Quick3D scenes. This repository being public
+  satisfies the matching source obligation.
+* **Commercial Qt** — that obligation does not arise, and the binary can be
+  distributed on whatever terms you choose.
+So cloning this and building it with an open-source Qt gives you a
+GPLv3-encumbered binary even though the source is MIT. That is a property of
+Qt, not of this project.
+`THIRD-PARTY-NOTICES.md` has the per-module detail and covers Sparkle,
+WinSparkle, the Countly SDK and the Inter typeface.
 

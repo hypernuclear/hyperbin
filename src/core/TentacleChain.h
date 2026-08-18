@@ -155,9 +155,33 @@ private:
     /// and the moves are slow enough to pass through untouched. It also
     /// gives the arm lag, which reads as weight.
     static constexpr float kAdopt = 0.30f;
+    /// How much SLOWER the tip adopts than the root, as a share of kAdopt.
+    ///
+    /// Uniform damping moves the whole arm as one piece, which is the last
+    /// mechanical thing about it: everything arrives at once, so a strike
+    /// has no follow-through and a recovery has no trailing end. Damping
+    /// the tip harder than the base makes the far end arrive LATE, which is
+    /// what secondary motion is — the same reason a whip cracks and a
+    /// dropped rope keeps moving after the hand stops.
+    ///
+    /// A share of kAdopt rather than a second constant, so the one dial
+    /// that controls how much the arm lags still controls all of it.
+    static constexpr float kTipLag = 0.45f;
     QVector3D m_p[kJoints];
     QVector3D m_was[kJoints];
     QVector3D m_side[kJoints];
+    /// The plane the current roll-up coils in, held for the whole roll.
+    ///
+    /// Derived per frame from the chain's own bend, this was the roll's
+    /// jitter: the axis is a cross product with the base-to-tip vector, so
+    /// an arm that passes near straight has almost no bend to read the
+    /// plane from, and the axis swings — or flips outright — between
+    /// frames. curlUp then rewrites the whole chain around a spiral that
+    /// has turned over, and the arm snaps through itself. Seeded once when
+    /// the roll begins and carried, the spiral is stable whatever the
+    /// solver does underneath it.
+    QVector3D m_curlAxis;
+    bool m_curling = false;
     float m_seg = 0.0f;
 };
 

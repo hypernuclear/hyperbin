@@ -167,6 +167,33 @@ static float smooth(float t)
     return t * t * (3.0f - 2.0f * t);
 }
 
+QVector3D TentacleEffect::cursorScene() const
+{
+    return QVector3D(float(m_cursor.x() - m_binRect.center().x()),
+                     float(m_binRect.center().y() - m_cursor.y()),
+                     0.0f);
+}
+
+void TentacleEffect::updatePull(float dt)
+{
+    // Faded out with distance because the host polls the pointer every
+    // frame and always reports it present — the overlay is click-through
+    // and gets no enter or leave events — so "present" says nothing at all
+    // about whether the pointer is anywhere near the bin. Distance is the
+    // only real signal there is.
+    const float binH = float(m_binSize.height());
+    const QVector3D cursor = cursorScene();
+    const float near0 = binH * 0.9f, far0 = binH * 2.4f;
+    for (int i = 0; i < kMaxTentacles; ++i) {
+        const float away = (cursor - armBase(i)).length();
+        const float raw = m_cursorOn
+            ? 1.0f - smooth((away - near0) / std::max(far0 - near0, 1.0f))
+            : 0.0f;
+        // About a sixth of a second to notice, and the same to forget.
+        m_pull[i] += (raw - m_pull[i]) * std::min(1.0f, dt * 6.0f);
+    }
+}
+
 QVector3D TentacleEffect::armEmerge(int i) const
 {
     const Seat &seat = kSeats[i];
@@ -207,8 +234,42 @@ void TentacleEffect::advanceMove(int i, float dt)
     const Move was = st.move;
     st.t = 0.0f;
     st.seed = armHash(float(i), m_time * 0.37f + 11.0f);
+    // Chosen here, once, and then held for the whole move. See ArmState::aim.
+    st.aim = kSeats[i].strike
+           + kSeats[i].swing * (armHash(float(i) + 0.25f, m_time * 0.91f + 7.0f)
+                                * 2.0f - 1.0f);
+    // HYPERBIN_FORCE_MOVE=<n> pins every arm to one move, in the order the
+    // enum declares them. Without it a move cannot be verified at all: the
+    // vocabulary is picked by a hash, so catching a particular one in a
+    // grab-and-exit run is luck, and "it looked right when I happened to
+    // see one" is precisely how the fruit rollup shipped invisible for two
+    // rounds — it was being computed and then erased every frame, and every
+    // screenshot that would have shown it was of some other move.
+    //
+    // ALTERNATED WITH IDLE, which is not a detail. Run back to back a move
+    // never starts from rest — it starts from wherever the last instance of
+    // itself left the arm — so the opening of the move cannot be observed
+    // at all. That is not hypothetical: it read the slap's wind-up as
+    // moving the arm OUTWARD, the exact opposite of what it does, because
+    // what the frames actually showed was the previous slap still
+    // recovering.
+    if (Q_UNLIKELY(qEnvironmentVariableIsSet("HYPERBIN_FORCE_MOVE"))) {
+        const Move want = Move(qEnvironmentVariableIntValue("HYPERBIN_FORCE_MOVE"));
+        st.move = was == want ? Move::Idle : want;
+        st.duration = st.move == Move::Idle ? 2.0f : 2.6f;
+        return;
+    }
     const float r = armHash(float(i) + 0.5f, m_time * 0.61f + 3.0f);
-    if (m_cursorOn && r < 0.55f) {
+    // Gated on the pointer being NEAR, not on it existing.
+    //
+    // This read `m_cursorOn`, which is the host's "present" flag and is
+    // unconditionally true — so better than half of every arm's move picks
+    // were a lunge at the pointer whatever the pointer was doing, including
+    // sitting on the far side of the screen. Reach's own ramp is not
+    // distance-faded either, so those lunges went to full extension. That
+    // is a large part of what read as the poses fighting each other.
+    const float pull = m_pull[i];
+    if (pull > 0.25f && r < 0.55f) {
         st.move = Move::Reach;
         st.duration = 1.6f + 1.4f * st.seed;
     } else if (was != Move::Idle && r < 0.45f) {
@@ -216,7 +277,11 @@ void TentacleEffect::advanceMove(int i, float dt)
         st.duration = 1.8f + 2.2f * st.seed;
     } else if (r < 0.62f) {
         st.move = Move::Slap;
-        st.duration = 1.15f;
+        // Long enough to have parts. See the envelope in armTarget: a
+        // wind-up, a strike, a stretch of crawling along the bin and a slow
+        // recovery do not fit in the 1.15s this used to run in — at that
+        // length the whole thing was a twitch.
+        st.duration = 2.6f + 0.9f * st.seed;
     } else if (r < 0.78f) {
         st.move = Move::Coil;
         st.duration = 2.4f + 1.2f * st.seed;
@@ -290,16 +355,10 @@ QVector3D TentacleEffect::armTarget(int i, float &flex, float &maxBend) const
     // toward a nearby pointer whatever else it is doing, and the Reach
     // move is the stronger version on top.
     //
-    // Faded out with distance because the host polls the pointer every
-    // frame and always reports it present — it is click-through and gets
-    // no enter or leave events — so "present" says nothing about whether
-    // it is anywhere near the bin.
-    const QVector3D cursor(float(m_cursor.x() - m_binRect.center().x()),
-                           float(m_binRect.center().y() - m_cursor.y()),
-                           0.0f);
-    const float away = (cursor - base).length();
-    const float near0 = binH * 0.9f, far0 = binH * 2.4f;
-    const float pull = 1.0f - smooth((away - near0) / std::max(far0 - near0, 1.0f));
+    // How much it cares is measured once a frame and low-passed — see
+    // updatePull, which also records why "present" is not the question.
+    const QVector3D cursor = cursorScene();
+    const float pull = m_pull[i];
     // Clamped to the arm's own reach, or an arm asked for something across
     // the screen simply points at it and stops looking like an arm.
     QVector3D toward = cursor;
@@ -320,43 +379,97 @@ QVector3D TentacleEffect::armTarget(int i, float &flex, float &maxBend) const
     case Move::Idle:
         posed = leaned; break;
     case Move::Slap: {
-        // Out fast, held, drawn back slowly -- the asymmetry is the whole
-        // of what makes it read as a hit rather than a wave.
-        // Out fast, barely held, snapped back. The hold was 0.12 of the
-        // move and the release took the remaining 0.70, which together
-        // read as the arm being STUCK to the bin for a beat. A hit is
-        // brief contact and a recoil: the arm should leave the wall faster
-        // than it arrived and overshoot on the way out.
+        // FOUR PARTS: wind up, strike, crawl, let go. The earlier version
+        // had two — out over a sixth of the move and back over a third —
+        // which is a twitch, and the note it replaced complained about the
+        // opposite problem, an arm that looked STUCK to the bin. Both are
+        // the same mistake read from either end: contact with no travel in
+        // it is either too long or too short and there is no length that
+        // makes it good. Contact that MOVES has somewhere to spend the
+        // time.
+        //
+        //   0.00 wind   the arm draws back off the bin before it hits
+        //   0.14 strike fast, and the only fast part
+        //   0.24 crawl  pinned to the wall, dragging down and around it
+        //   0.66 lift   slowly off, no rebound
+        constexpr float kWind = 0.14f, kStrike = 0.24f, kCrawl = 0.56f;
+        // How far along the wall the arm has dragged, 0..1. Wanted below
+        // as well as here, so it is computed whatever phase we are in.
+        const float crawl =
+            std::clamp((u - kStrike) / (kCrawl - kStrike), 0.0f, 1.0f);
         float hit;
-        if (u < 0.16f)
-            hit = smooth(u / 0.16f);
-        else if (u < 0.22f)
+        if (u < kWind) {
+            // ANTICIPATION. Negative, so the arm goes PAST its resting pose
+            // in the direction away from the wall — the pose is a blend
+            // from rest toward the wall, so a negative coefficient is a
+            // reach backwards along the same line and costs nothing to
+            // express. Nothing in animation reads as intent without it:
+            // a strike that begins at the moment of the strike looks like
+            // the arm was pushed, not like it decided.
+            hit = -0.26f * smooth(u / kWind);
+        } else if (u < kStrike) {
+            const float r = (u - kWind) / (kStrike - kWind);
+            hit = -0.26f + 1.26f * smooth(r);
+        } else if (u < kCrawl) {
             hit = 1.0f;
-        else {
-            const float r = (u - 0.22f) / 0.34f;
-            hit = r < 1.0f ? 1.0f - smooth(r) : 0.0f;
-            // Recoil: past the resting pose and back, so the arm rebounds
-            // off the bin rather than merely stopping pushing on it.
-            if (r > 0.55f && r < 1.9f)
-                hit -= 0.22f * std::sin((r - 0.55f) / 1.35f * 3.14159265f);
+        } else {
+            // Off slowly, and with no recoil. The rebound that used to be
+            // here is the right ending for a hit-and-away, and the wrong
+            // one for a hit that has been resting on the bin for the best
+            // part of a second: something that has settled onto a surface
+            // peels off it.
+            //
+            // SQUARED, not smoothstep, and the difference is the whole
+            // ending. Smoothstep is slow-fast-slow, so it puts its speed in
+            // the middle of the release — and the chain's own lag then
+            // carries that peak later still, which measured as the arm
+            // hanging on the bin for most of the recovery and then hurrying
+            // up in the last tenth. Squared is fast-then-slow: the arm
+            // unsticks promptly and drifts the rest of the way, and the lag
+            // now has slack behind it to be absorbed into instead of a
+            // deadline to miss.
+            const float r = (u - kCrawl) / (1.0f - kCrawl);
+            hit = (1.0f - r) * (1.0f - r);
         }
-        flex = 1.0f - 0.75f * hit;
+        // Rigid through the strike, then loosened again while it crawls.
+        // This is what the slither is actually made of — a wave running
+        // down an arm that is pinned at the far end has to travel as a
+        // ripple ALONG the surface, because the ends cannot move. Held
+        // rigid the whole time the arm was a bar leaning on the bin.
+        flex = 1.0f - 0.75f * std::max(hit, 0.0f)
+             + 0.60f * smooth(std::min(crawl * 2.2f, 1.0f))
+                     * (1.0f - smooth(std::max((u - kCrawl) / 0.2f, 0.0f)));
         // WELL BELOW the contact point, not on it. Aimed AT the wall the
         // arm arrives pointing at it and pokes; aimed at a place further
         // down, the last joints have to run along the wall to get there
         // and the arm lands on its flat instead of its tip. That is the
         // whole difference between prodding the bin and hitting it, and it
         // is a property of where the target is, not of the solver.
+        //
         // ON the wall at the depth it actually lands, not at a fixed
         // radius. The bin narrows going down, so a constant lateral target
         // put the tip outside a wall that was no longer there, and the
         // mask -- which does know about the taper -- correctly drew it in
         // front of the bin. Measured, 9,132 leaked pixels on the deepest
         // slap. Both sides now read the same profile.
-        const float wallY = rootY() - binH * 0.55f;
-        const QVector3D wall(std::copysign(binHalfWidthAt(wallY) * 0.98f, out.x()),
-                             wallY,
-                             out.z() * mouthReachZ() * 0.55f);
+        //
+        // And it TRAVELS. The contact point starts high on the wall where
+        // the strike lands and works its way down and across while the arm
+        // holds on. Because binHalfWidthAt is re-read at the new height,
+        // the tip stays on the taper as it descends instead of drifting
+        // off a wall that is narrowing under it.
+        //
+        // Aimed with st.aim, FROZEN when the move began, rather than with
+        // the wandering `out` the resting pose uses — see ArmState::aim for
+        // the teleport that costs.
+        const QVector3D aim(std::sin(st.aim), 0.0f, std::cos(st.aim) * 0.30f);
+        const float wallY = rootY() - binH * (0.44f + 0.26f * crawl);
+        const float sway = std::sin(crawl * 2.9f + sb * 6.28f);
+        const QVector3D wall(
+            std::copysign(binHalfWidthAt(wallY) * (0.98f - 0.06f * crawl),
+                          aim.x()),
+            wallY,
+            (aim.z() + 0.42f * sway) * mouthReachZ() * 0.55f);
         posed = leaned + (wall - leaned) * hit;
         break;
     }
@@ -391,10 +504,18 @@ QVector3D TentacleEffect::armTarget(int i, float &flex, float &maxBend) const
         posed = leaned + (around - leaned) * ring;
         break;
     }
-    case Move::Roll:
-        // The target barely matters here -- the shape comes from curlUp,
-        // applied after the solve. All this does is keep the arm from
-        // wandering while it rolls.
+    case Move::Roll: {
+        // The shape comes from curlUp, applied after the solve. What the
+        // target has to do is AGREE with it.
+        //
+        // It used to be the plain resting pose, which asks for an arm at
+        // 0.80 of full stretch — so every frame the solver straightened the
+        // arm out to reach up there and curlUp then rewrote it back into a
+        // spiral, and the two took turns. That fight is most of what the
+        // roll's jitter was; the axis flip (see TentacleChain::curlUp) was
+        // the rest. A rolled-up arm's tip is near its own base, so the
+        // target is drawn in as the roll tightens and the solver arrives at
+        // roughly the pose curlUp is about to impose.
         //
         // The bend limit HAS to come up with it, and this is why the roll
         // was invisible: curlUp lays a spiral turning up to 0.75 radians a
@@ -411,16 +532,30 @@ QVector3D TentacleEffect::armTarget(int i, float &flex, float &maxBend) const
         // anything past that has segments doubling back through their own
         // neighbours.
         maxBend = 1.32f;
-        posed = leaned;
+        {
+            const float c = rollAmount(i);
+            const QVector3D gathered = base
+                + QVector3D(0.0f, 1.0f, 0.0f) * (L * 0.44f)
+                + out * (mouthRadius() * 0.22f);
+            posed = leaned + (gathered - leaned) * c;
+        }
         break;
+    }
     case Move::Reach: {
         // The full lunge, on top of the lean every arm already has. The
         // pointer arrives in the host item's pixels with +y DOWN and the
         // scene is bin-local with +y UP, which is the same conversion the
         // mouth measurements get.
+        //
+        // Faded by `pull` like everything else that chases the pointer. It
+        // was not, and the lunge therefore went to full extension at a
+        // target clamped to the arm's reach in the pointer's direction —
+        // which for a pointer on the far side of the screen is simply the
+        // arm pointing off at nothing. An arm mid-Reach when the pointer
+        // walks away now relaxes instead of holding the point.
         const float ring = smooth(std::min(u * 2.5f, 1.0f))
                          * (1.0f - smooth(std::max((u - 0.80f) / 0.20f, 0.0f)));
-        posed = leaned + (toward - leaned) * ring;
+        posed = leaned + (toward - leaned) * (ring * pull);
         break;
     }
     }
@@ -515,8 +650,21 @@ float TentacleEffect::rollAmount(int i) const
     // In over the first third, held, out over the last quarter, so it
     // rolls up, sits curled a moment, and unrolls.
     const float u = moveProgress(i);
-    return smooth(std::min(u / 0.34f, 1.0f))
-         * (1.0f - smooth(std::max((u - 0.76f) / 0.24f, 0.0f)));
+    const float c = smooth(std::min(u / 0.34f, 1.0f))
+                  * (1.0f - smooth(std::max((u - 0.76f) / 0.24f, 0.0f)));
+    // UNROLLED BY THE POINTER, and this is the reconciliation rather than a
+    // priority.
+    //
+    // Following the pointer and being rolled into a spiral are not two
+    // strengths of the same thing that can be blended: one is a statement
+    // about where the tip goes, the other about the curvature of every
+    // joint, and applying both at once is the solver and curlUp overwriting
+    // each other frame by frame. That is what the jitter was.
+    //
+    // So the roll yields. The pointer keeps precedence — the arm visibly
+    // uncurls and comes to it, which is a better answer than either winning
+    // outright, because the unrolling IS the reaction.
+    return c * (1.0f - m_pull[i]);
 }
 float TentacleEffect::mouthReachZ() const
 {
@@ -533,6 +681,9 @@ void TentacleEffect::setCameraTilt(float degrees)
 void TentacleEffect::updateArms()
 {
     const int n = count();
+    // Before anything reads it: the moves are chosen from it and the roll
+    // is faded by it.
+    updatePull(m_dt);
     for (int i = 0; i < n; ++i) {
         advanceMove(i, m_dt);
         const QVector3D base = armBase(i);
@@ -604,6 +755,16 @@ void TentacleEffect::updateArms()
                 if (worst > float(m_binSize.height()) * 0.10f)
                     qInfo("tentacle %d: JOINT lurched %.0f in one frame (move %d)",
                           i, double(worst), int(m_state[i].move));
+                // HYPERBIN_TRACE: every frame, not just the alarming ones.
+                // The threshold above counts events, and a count is the
+                // wrong statistic for comparing two versions of a move —
+                // lengthen a move and it accrues more of them while being
+                // calmer per frame. This once said a re-timed slap was
+                // twice as bad when its per-frame rate had in fact more
+                // than halved.
+                if (Q_UNLIKELY(qEnvironmentVariableIsSet("HYPERBIN_TRACE")))
+                    qInfo("F %d %d %.3f %.2f", i, int(m_state[i].move),
+                          double(moveProgress(i)), double(worst));
             }
             for (int j = 0; j < TentacleChain::kJoints; ++j)
                 m_lastJoints[i][j] = m_chain[i].joints()[j];
@@ -665,7 +826,27 @@ float TentacleEffect::mouthX() const
 
 float TentacleEffect::mouthY() const
 {
-    return float(0.5 - m_mouth.centre.y()) * float(m_binSize.height());
+    // Divided by cos(tilt), and that is not a fudge — it is undoing the
+    // projection the measurement already went through.
+    //
+    // The mouth's height arrives as a fraction of the icon, i.e. a position
+    // ON SCREEN. Putting that number straight into the scene forgets that
+    // the camera then foreshortens y by cos(tilt), so the scene's mouth
+    // landed 4.4% lower on screen than the artwork's. Nine pixels on a
+    // 600px bin, which does not sound like much until you notice what it
+    // is nine pixels OF: the mask compares an arm against the measured lip
+    // (a screen curve) and against the bin's front face (a scene surface),
+    // and those two only meet at the rim if the rim is in the same place in
+    // both. It was not, so a thin band around the rim was judged below the
+    // lip and behind the wall at the same time, and arms crossing it were
+    // clipped.
+    //
+    // Everything derived from this — the roots, the heap, the shading
+    // reference — moves with it, so the shapes are unchanged; they are all
+    // simply nine pixels further up, where the artwork says they are.
+    const float c = std::cos(m_cameraTilt * 3.14159265f / 180.0f);
+    return float(0.5 - m_mouth.centre.y()) * float(m_binSize.height())
+         / std::max(0.2f, c);
 }
 
 float TentacleEffect::mouthRadius() const

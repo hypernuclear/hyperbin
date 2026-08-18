@@ -397,6 +397,19 @@ private:
         float t = 0.0f;         ///< seconds into the move
         float duration = 2.0f;
         float seed = 0.0f;      ///< re-rolled per move, so repeats differ
+        /// Which way a STRIKE lands, radians, frozen for the whole move.
+        ///
+        /// Not read from the wandering direction the resting pose uses, and
+        /// that is a correctness matter rather than a preference. Where the
+        /// tip lands is chosen with copysign on the lateral component, and
+        /// copysign has a step at zero: the centre arm wanders +-0.75 rad
+        /// about the bin's axis, so whenever its wander crossed the axis
+        /// mid-strike the target jumped from one wall to the other in a
+        /// single frame. Measured at 167 scene units, which is most of the
+        /// bin's width, and it showed on screen as the arm blinking off the
+        /// wall and back. Lengthening the slap made a crossing likely
+        /// WITHIN one strike rather than merely between them.
+        float aim = 0.0f;
     };
     /// Re-solve every chain that is out. Every step.
     void updateArms();
@@ -409,6 +422,17 @@ private:
     QVector3D m_lastJoints[kMaxTentacles][TentacleChain::kJoints];
     QPointF m_cursor;
     bool m_cursorOn = false;
+    /// How much the pointer commands each arm, 0..1 — and it is STATE.
+    ///
+    /// Computed fresh per call it was a pure function of where the pointer
+    /// is, so a pointer that jumps across the screen changed every arm's
+    /// authority in one frame, which is a step function driving a solver.
+    /// Low-passed here instead: an arm notices the pointer over a beat and
+    /// loses interest over a beat, and nothing downstream sees an edge.
+    ///
+    /// It is also the gate on the moves that cannot coexist with following
+    /// the pointer — see advanceMove and rollAmount.
+    float m_pull[kMaxTentacles] = {};
 
     /// Where an arm is rooted, and what it is reaching for, both in scene
     /// units. `hit` is 0 at rest and 1 at full strike.
@@ -423,6 +447,12 @@ private:
     QVector3D armTarget(int i, float &flex, float &maxBend) const;
     /// How tightly this arm is rolled up right now, 0..1.
     float rollAmount(int i) const;
+    /// The pointer in scene units: bin-local pixels, origin at the rect's
+    /// centre, +y UP. It arrives from the host with +y down.
+    QVector3D cursorScene() const;
+    /// Re-measure how much the pointer commands each arm. Once per step,
+    /// before anything reads m_pull.
+    void updatePull(float dt);
 
 
     BinMouth m_mouth;

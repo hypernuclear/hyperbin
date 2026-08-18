@@ -114,6 +114,34 @@ Two things it took several wasted rounds to learn:
   all. `HYPERBIN_PREVIEW_SHOT_MS` exists for exactly that: shoot the same
   scene half a second apart and difference the two.
 
+### Pinning down one gesture
+
+A vocabulary of moves picked by a hash cannot be verified by screenshot:
+catching a particular one is luck, and *"it looked right when I happened
+to see one"* is how the tentacles' roll-up shipped invisible for two
+rounds — it was being computed and then erased every frame, and every
+grab that would have shown it was of some other move.
+
+```sh
+HYPERBIN_PREVIEW_CURSOR=300,180   # pin the pointer, in the item's pixels
+HYPERBIN_FORCE_MOVE=1             # every arm runs this move, in enum order
+HYPERBIN_DEBUG=1                  # shout when a target or a joint teleports
+HYPERBIN_TRACE=1                  # ...and log EVERY frame: arm, move, u, jump
+--empty-at 2500                   # empty the bin, to see a leaving animation
+```
+
+`HYPERBIN_FORCE_MOVE` alternates the forced move with an idle, so the move
+under test always starts from rest. Run back to back it would start from
+wherever its own last instance left the arm — which read the slap's
+wind-up as moving the arm *outward*, the exact opposite of what it does,
+because the frames were showing the previous slap still recovering.
+
+Prefer `HYPERBIN_TRACE` over the threshold-triggered lines from
+`HYPERBIN_DEBUG` when comparing two versions of a move. A count of alarming
+frames is the wrong statistic: lengthen a move and it accrues more of them
+while being calmer per frame. That reading once said a re-timed slap was
+twice as bad when its per-frame motion had in fact more than halved.
+
 ## Bringing in a model
 
 Most geometry here is generated, not imported — `OozeGeometry.cpp` sweeps

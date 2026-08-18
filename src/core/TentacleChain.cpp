@@ -61,8 +61,14 @@ void TentacleChain::solve(const QVector3D &base, const QVector3D &emerge,
     // Adopt only part of the new pose. Run BEFORE the last constraint pass
     // so the blend cannot leave segments the wrong length — a lerp between
     // two valid chains is not itself a valid chain.
-    for (int i = 1; i < kJoints; ++i)
-        m_p[i] = m_was[i] + (m_p[i] - m_was[i]) * kAdopt;
+    //
+    // Less of it the further out the joint is, so the tip arrives after the
+    // root does. See kTipLag.
+    for (int i = 1; i < kJoints; ++i) {
+        const float s = float(i) / float(kJoints - 1);
+        const float adopt = kAdopt * (1.0f - kTipLag * s);
+        m_p[i] = m_was[i] + (m_p[i] - m_was[i]) * adopt;
+    }
     constrain(base, maxBend);
     holdRoot(base, emerge);
     buildFrames();
@@ -151,12 +157,28 @@ void TentacleChain::limitBend(float maxBend)
 void TentacleChain::curlUp(const QVector3D &base, const QVector3D &emerge,
                            float turn, float blend)
 {
-    if (blend <= 0.0f)
+    if (blend <= 0.0f) {
+        m_curling = false;
         return;
-    // Which plane to coil in: the arm's own current bend, so it rolls the
-    // way it was already going rather than snapping into some world axis.
+    }
     const QVector3D t0 = dir(m_p[1] - m_p[0], dir(emerge, QVector3D(0, 1, 0)));
-    QVector3D axis = QVector3D::crossProduct(t0, m_p[kJoints - 1] - m_p[0]);
+    // Which plane to coil in: the arm's own bend AT THE MOMENT THE ROLL
+    // STARTS, so it rolls the way it was already going — and then that
+    // plane is held, so the spiral cannot turn over underneath itself.
+    if (!m_curling) {
+        QVector3D axis = QVector3D::crossProduct(t0, m_p[kJoints - 1] - m_p[0]);
+        if (axis.lengthSquared() < 1e-8f)
+            axis = QVector3D::crossProduct(t0, QVector3D(0, 0, 1));
+        if (axis.lengthSquared() < 1e-8f)
+            axis = QVector3D::crossProduct(t0, QVector3D(1, 0, 0));
+        m_curlAxis = axis.normalized();
+        m_curling = true;
+    }
+    // Re-squared against the arm's current direction. The plane is held,
+    // but the arm it belongs to still swings, and an axis that has drifted
+    // out of perpendicular makes the spiral cone outward instead of
+    // closing — Rodrigues below assumes the two are square.
+    QVector3D axis = m_curlAxis - t0 * QVector3D::dotProduct(m_curlAxis, t0);
     if (axis.lengthSquared() < 1e-8f)
         axis = QVector3D::crossProduct(t0, QVector3D(0, 0, 1));
     if (axis.lengthSquared() < 1e-8f)
@@ -283,7 +305,24 @@ void TentacleChain::applyWave(float time, float phase, float flex)
     constexpr float kFrequency = 2.0f;
     constexpr float kSpeed = 3.0f;
     constexpr float kAmplitude = 0.040f;   // of the arm's own length
-    const float amp = kAmplitude * length() * flex;
+
+    // BREATH AND WANDER, and this is the difference between an undulation
+    // and a machine running.
+    //
+    // Two fixed sines produce a wave of exactly one strength at exactly one
+    // pace forever, and the eye finds that period quickly however
+    // complicated the sum of them looks. Living motion gathers and eases:
+    // it pushes harder for a stroke or two, then idles.
+    //
+    // The pace wander is added to the PHASE and not multiplied into the
+    // time, which is the only form of this that works. Scaling time by a
+    // varying factor makes the effective frequency d/dt[t*k(t)] = k + t*k',
+    // so the modulation grows without bound and the wave ends up buzzing
+    // after a few minutes. Displacing the phase speeds the crest up and
+    // slows it down around a fixed mean and stays there.
+    const float breath = 0.70f + 0.48f * std::sin(time * 0.23f + phase);
+    const float wander = 0.90f * std::sin(time * 0.17f + phase * 1.9f);
+    const float amp = kAmplitude * length() * flex * breath;
     if (amp <= 0.0f)
         return;
 
@@ -294,8 +333,9 @@ void TentacleChain::applyWave(float time, float phase, float flex)
                                    QVector3D(1, 0, 0));
         const QVector3D up = QVector3D::crossProduct(t, side);
 
-        const float a = time * kSpeed + phase + s * kFrequency * 6.28318531f;
-        const float b = time * kSpeed * 0.61f + phase * 1.7f
+        const float a = time * kSpeed + phase + wander
+                      + s * kFrequency * 6.28318531f;
+        const float b = time * kSpeed * 0.61f + phase * 1.7f + wander * 0.7f
                       + s * kFrequency * 4.10318531f;
         // Held at the root. A wave that displaces the first joints pulls
         // the arm out of the hole it is supposed to be coming through.

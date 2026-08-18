@@ -194,10 +194,27 @@ void TentacleChain::settle(const QVector3D &base, const QVector3D &emerge,
 void TentacleChain::pushOutside(float topY, float binHeight, float halfX,
                                 float halfZ, float taper, int fromJoint)
 {
+    // ONCE OUT, STAY OUT.
+    //
+    // Walking the chain in order and remembering whether it has left the
+    // bin yet is what settles an otherwise ambiguous question. A joint
+    // below the lip and near the axis is either an arm still down in the
+    // rubbish — which should stay hidden — or the curled-back tip of one
+    // that went over the rim and is hanging outside, which must not be.
+    // Position alone cannot tell those apart: they are the same point.
+    //
+    // Order along the chain can, because an arm cannot re-enter the bin
+    // through its own wall. Everything past the first joint that is out is
+    // also out. Without this, the tip of a slap hooked back toward the bin,
+    // fell under the threshold that had been holding it in front, and was
+    // cut off with a detached sliver left behind.
+    bool escaped = false;
     for (int i = std::max(1, fromJoint); i < kJoints; ++i) {
         const float y = m_p[i].y();
-        if (y >= topY)
-            continue;   // in the opening, where it belongs
+        if (y >= topY) {
+            escaped = true;   // in the opening, where it belongs
+            continue;
+        }
         const float below = std::clamp((topY - y) / std::max(binHeight, 1e-4f),
                                        0.0f, 1.0f);
         const float sx = halfX * (1.0f + (taper - 1.0f) * below);
@@ -205,15 +222,27 @@ void TentacleChain::pushOutside(float topY, float binHeight, float halfX,
         const float ex = m_p[i].x() / std::max(sx, 1e-4f);
         const float ez = m_p[i].z() / std::max(sz, 1e-4f);
         const float r = std::sqrt(ex * ex + ez * ez);
-        if (r >= 1.0f)
-            continue;   // already outside
-        // Out along the shortest route in the ellipse's own space, which
-        // for a near-circular section is near enough the true nearest
-        // point and costs one square root instead of a quartic solve.
-        // Biased FORWARD when a joint is close to the axis: dead centre
-        // there is no shortest direction, and toward the camera is the one
-        // that reads as the arm being in front rather than beside.
-        if (r < 1e-3f) {
+        const float front = sz * std::sqrt(std::max(0.0f, 1.0f - ex * ex));
+
+        if (r >= 1.0f || m_p[i].z() >= front) {
+            escaped = true;   // already outside it, or already ahead of it
+            continue;
+        }
+
+        if (escaped) {
+            m_p[i].setZ(front * 1.04f);
+            continue;
+        }
+
+        // Still on its way out, so the nearest surface is the right one —
+        // this is an arm inside the opening and the shortest way out is the
+        // way it came. Past two thirds of the way to the edge, though, the
+        // nearest surface is the SIDE, and a joint parked on the side sits
+        // at a small z where the mask correctly puts the bin in front of
+        // it. Out sideways is not out in front.
+        if (std::abs(ex) > 0.66f) {
+            m_p[i].setZ(std::max(m_p[i].z(), front * 1.04f));
+        } else if (r < 1e-3f) {
             m_p[i].setZ(sz * 1.02f);
         } else {
             const float k = 1.02f / r;

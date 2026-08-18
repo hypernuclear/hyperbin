@@ -54,7 +54,7 @@ Done and building:
 - `FlyItem` — batched scene-graph rendering, explicit frame clock
 - `StubTrashTarget` — fake geometry cycling fullness, so the sim is
   developable before either native backend exists
-- `tests/simtest.cpp` — populates, moves, stays over the bin, scales,
+- `tests/flies/` — populates, moves, stays over the bin, scales,
   fully disperses when emptied
 
 Verified: builds clean on macOS, runs 4s without crashing, sim test

@@ -18,10 +18,28 @@
     },
     {
       "name": "dev",
-      "displayName": "Dev (Debug)",
-      "description": "Qt is auto-detected from ~/Qt; set QT_ROOT or CMAKE_PREFIX_PATH to override",
+      "displayName": "Debug (tests on)",
+      "description": "Unoptimised, assertions live. Qt is auto-detected from ~/Qt; set QT_ROOT or CMAKE_PREFIX_PATH to override",
       "inherits": "base",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "HYPERBIN_BUILD_TESTS": "ON"
+      },
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "relwithdebinfo",
+      "displayName": "RelWithDebInfo (tests on)",
+      "description": "Optimised, with symbols. What to profile and what to debug a timing-dependent bug in — a Debug build is slow enough to change the behaviour of anything that depends on frame rate, which most of this app does",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "HYPERBIN_BUILD_TESTS": "ON"
+      },
       "condition": {
         "type": "notEquals",
         "lhs": "${hostSystemName}",
@@ -30,9 +48,13 @@
     },
     {
       "name": "release",
-      "displayName": "Release",
+      "displayName": "Release (no tests)",
+      "description": "What ships. Tests off: a packaging run has no use for them, and this is the only preset where that is true",
       "inherits": "base",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "HYPERBIN_BUILD_TESTS": "OFF"
+      },
       "condition": {
         "type": "notEquals",
         "lhs": "${hostSystemName}",
@@ -42,10 +64,11 @@
     {
       "name": "ci",
       "displayName": "CI (unsigned)",
-      "description": "CI runners have no signing identity",
+      "description": "CI runners have no signing identity. Tests ON — this is the one build whose whole job is to catch a regression",
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
+        "HYPERBIN_BUILD_TESTS": "ON",
         "HYPERBIN_CODESIGN_IDENTITY": ""
       },
       "condition": {
@@ -57,7 +80,34 @@
   ],
   "buildPresets": [
     { "name": "dev", "configurePreset": "dev" },
+    { "name": "relwithdebinfo", "configurePreset": "relwithdebinfo" },
     { "name": "release", "configurePreset": "release" },
-    { "name": "ci", "configurePreset": "ci" }
+    { "name": "ci", "configurePreset": "ci" },
+    {
+      "name": "check",
+      "displayName": "Build and run the tests",
+      "configurePreset": "dev",
+      "targets": ["check"]
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error", "stopOnFailure": false }
+    },
+    {
+      "name": "relwithdebinfo",
+      "configurePreset": "relwithdebinfo",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error", "stopOnFailure": false }
+    },
+    {
+      "name": "ci",
+      "configurePreset": "ci",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error", "stopOnFailure": false }
+    }
   ]
 }

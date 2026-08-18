@@ -171,14 +171,37 @@
       }
     },
     {
-      // Headless swarm check — populates, moves, orbits, is deterministic,
-      // and fully disperses when the bin empties.
-      "name": "Test: Fly Simulation",
+      // Step into ONE test.
+      //
+      // For running them, use the Testing panel (the flask in the activity
+      // bar) or select the `check` target and press build — CMake Tools
+      // populates the panel from CTest, so every test function appears
+      // there by name. This entry is for the other job: stopping inside a
+      // failing one. Pass the test function as an argument to run just it,
+      // e.g. "args": ["roll_doesNotLurch"]; with no arguments a Qt Test
+      // binary runs every slot it has.
+      "name": "Test: Tentacle chain (debug one)",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/build/simtest",
+      "program": "${workspaceFolder}/build/tests/tentacle/tst_tentacle_chain",
       "stopAtEntry": false,
-      "cwd": "${workspaceFolder}",
+      "cwd": "${workspaceFolder}/build",
+      "environment": [],
+      "args": [],
+      "osx": {
+        "MIMode": "lldb",
+        "targetArchitecture": "arm64"
+      }
+    },
+    {
+      // The swarm's contract: populates, moves, lands, walks, stays over
+      // the bin, scales with it, and fully disperses when emptied.
+      "name": "Test: Fly simulation (debug one)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/tests/flies/tst_fly_sim",
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}/build",
       "environment": [],
       "args": [],
       "osx": {

@@ -4,6 +4,15 @@
   "cmake.useCMakePresets": "always",
   "cmake.configureOnOpen": true,
   "cmake.buildBeforeRun": true,
+  // Put every CTest test in the Testing panel (the flask in the activity
+  // bar), individually runnable. This is why each test function is
+  // registered with its own add_test rather than one per binary — the
+  // panel shows exactly what CTest knows about, so one add_test per
+  // executable would collapse 39 checks into 5 rows.
+  "cmake.ctest.testExplorerIntegrationEnabled": true,
+  // Tests are seconds each and independent, so run them at once. The
+  // slowest single check simulates 220 seconds of wave and takes ~1s.
+  "cmake.ctest.allowParallelJobs": true,
   "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
   "C_Cpp.default.cppStandard": "c++20",
   "C_Cpp.errorSquiggles": "enabled",

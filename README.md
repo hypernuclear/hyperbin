@@ -157,8 +157,8 @@ invisible.
 Nothing draws when the Dock is auto-hidden — the icon is parked outside
 every display and there is nothing to sit on.
 
-**Headless.** `./build/simtest` — the simulations only, never the
-renderer, so it runs without a display. It asserts the swarm populates,
+**Headless.** `cd build && ctest --output-on-failure` — the simulations
+only, never the renderer, so it runs without a display. It asserts the swarm populates,
 moves, lands, walks, stays over the bin, scales with it and fully
 disperses when emptied; that the ooze creeps rather than snapping on,
 grows with the trash and recedes to nothing; that the overlay margins are

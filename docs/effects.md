@@ -88,7 +88,7 @@ change meaning when the list is reordered.
 `Settings` deliberately does not know which effects exist. It stores an
 opaque string; `EffectRegistry` resolves an empty or unknown id to its
 default. That keeps the value store out of the renderer's dependency
-graph, which matters because `simtest` links it and must stay headless.
+graph, which matters because the tests link it and must stay headless.
 
 ## Looking at it
 
@@ -304,13 +304,39 @@ highlight. To make something genuinely disappear, `discard` it.
 
 ## Testing
 
-`simtest` links the simulation only, never the renderer. Keep the
+The tests link the simulation only, never the renderer. Keep the
 behaviour in a plain class with no Qt GUI dependency (as `FlySim` is) and
 the effect a thin wrapper around it, and the interesting parts stay
 testable without a display.
+
+Qt Test, one executable per area under `tests/`, every test function
+registered with CTest on its own:
+
+```sh
+cd build && ctest --output-on-failure
+ctest -R Tentacle          # just the solver
+ctest -R Flies.walking     # one check
+```
+
+Registering each function separately is not bookkeeping. The harness this
+replaced ran everything from one `main()` and aborted on the first
+`return fail(...)`, so a broken check hid every check after it — and it
+did: the bend-limit test failing meant the wave, settling and
+`pushOutside` checks never ran at all.
 
 Every hard-won behaviour in the fly simulation has an assertion, and
 several of them exist because a "fix" quietly broke something else two
 turns later. When you tune a number, check whether a test now encodes the
 old taste rather than a real invariant — and widen it deliberately rather
 than deleting it.
+
+**Set a threshold by breaking the thing it guards.** A test that passes
+against code with the feature ripped out is worse than no test, because it
+reads as coverage. Three of the tentacle checks were written, passed, and
+turned out to be exactly that — one asserted on a joint the code writes
+directly, so it could never fail; one aimed at a target the solver reached
+without the routine under test; one sampled a 6-second window of a
+27-second cycle and made correct code look twice as bad as broken code.
+Delete the implementation, watch the test go red, then put it back. The
+figures those runs produce are what the bound should be built from, and
+`tests/tentacle/tst_tentacle_chain.cpp` quotes them beside each one.

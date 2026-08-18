@@ -16,6 +16,15 @@ endif()
 # submission, or a distro package where the package manager owns updates.
 option(HYPERBIN_AUTO_UPDATE "Include the auto-updater (Sparkle / WinSparkle)" ON)
 
+# The headless test suite. ON everywhere that matters — CI, and any build
+# somebody is going to change code in — and available to turn off because
+# it is the one part of the tree that a packaging run has no use for.
+#
+# Toggle it from the CMake UI: in VS Code, "CMake: Edit CMake Cache (UI)"
+# lists it as a checkbox; reconfiguring is enough to make the test targets
+# and the CTest registrations appear or vanish.
+option(HYPERBIN_BUILD_TESTS "Build the headless test suite" ON)
+
 # --- versions ---------------------------------------------------------------
 #
 # Two numbers, and they do different jobs.
@@ -101,7 +110,7 @@ if(NOT CMAKE_PREFIX_PATH)
     endif()
 endif()
 
-find_package(Qt6 6.11 QUIET COMPONENTS Core Gui Widgets Svg Qml Quick QuickControls2 Quick3D ShaderTools)
+find_package(Qt6 6.11 QUIET COMPONENTS Core Gui Widgets Svg Qml Quick QuickControls2 Quick3D ShaderTools Test)
 if(NOT Qt6_FOUND)
     if(WIN32)
         message(FATAL_ERROR
@@ -123,7 +132,7 @@ if(NOT Qt6_FOUND)
             "have a CMakeUserPresets.json.")
     endif()
 endif()
-find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Widgets Svg Qml Quick QuickControls2 Quick3D ShaderTools)
+find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Widgets Svg Qml Quick QuickControls2 Quick3D ShaderTools Test)
 qt_standard_project_setup(REQUIRES 6.11)
 
 # --- auto-update ------------------------------------------------------------
@@ -456,14 +465,24 @@ qt_add_resources(hyperbin "hyperbin_shaders3d"
         shaders/tentacle.frag
 )
 
-# Headless swarm check. No GUI, so it runs on CI and under the debugger
-# without a display.
-add_executable(simtest tests/simtest.cpp src/core/FlySim.cpp src/core/OozeSim.cpp
-    src/core/TentacleChain.cpp
-               src/core/DistanceField.cpp src/app/Settings.cpp)
-target_include_directories(simtest PRIVATE src/core src/app)
-# Gui, not just Core: the distance field is a QImage. It needs no display
-target_link_libraries(simtest PRIVATE Qt6::Core Qt6::Gui)
+# Headless checks. No GUI, so they run on CI and under the debugger without
+# a display.
+#
+# Qt Test, one executable per area, every test function registered with
+# CTest individually — so `ctest -R Tentacle` runs just the solver's checks
+# and a failure names itself instead of being one line of a single binary's
+# output. This replaced a hand-rolled harness whose `return fail(...)`
+# aborted main on the first failure, which meant a broken check hid every
+# check after it.
+#
+# enable_testing() has to be called from THIS file rather than from
+# tests/CMakeLists.txt: CTest only writes a top-level CTestTestfile.cmake
+# for the directory it was enabled in, and `ctest` run from the build root
+# finds nothing without one.
+if(HYPERBIN_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
 
 # Overlay app: no Dock icon, no menu bar. LSUIElement keeps it a
 # background agent driven from the menu-bar item.

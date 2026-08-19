@@ -16,6 +16,51 @@ release promotes that section to the new version and dates it.
 
 ### Fixed
 
+## [1.1.0] - 2026-08-19
+
+### Added
+
+- **A third effect: Tentacles.** Arms reach out of the bin, feel along the
+  rim, slap it, coil, wrap around it and curl up, and thrash their way back
+  under the rubbish when the bin is emptied. Each arm is a joint chain
+  solved by FABRIK with a travelling wave laid over it, masked against the
+  bin's measured opening so an arm passes behind the lid and behind the
+  rubbish rather than floating over the icon.
+- **Eyes in the goo.** The ooze grows eyeballs that open, blink and glance
+  around, seated on the gel's own surface so the body swells and closes a
+  meniscus around each one.
+- **The eyes follow the pointer.** Bring the cursor over the bin and they
+  converge on it, tracking it until it leaves.
+- **Low Power Mode**, in the menu under *Advanced*: On, Off, or Auto, where
+  Auto follows the system's own low power setting on macOS and Windows.
+  Outside it, every effect now runs at the display's full refresh rate
+  instead of being capped at 30fps.
+- **A licence.** hyperbin's own source is MIT. `THIRD-PARTY-NOTICES.md`
+  records the terms of everything else, including which Qt modules decide
+  what a given build may be distributed under.
+
+### Changed
+
+- **Usage analytics are now on by default.** They can still be switched off
+  in the menu under *Share Usage Data*, and once off they stay off. What is
+  collected is unchanged: which effect is running, how the amount and
+  threshold are set, whether the bin got emptied, the app version and the
+  OS — never file names, paths, or anything about what was thrown away.
+- **hyperbin now starts at login by default.** Registered once, on first
+  run only; unticking *Open at Login* afterwards sticks.
+- Every setting in the menu now reports itself when it changes. Five of the
+  nine event types were previously declared but never actually sent.
+
+### Fixed
+
+- The effects no longer shiver against the Dock icon. Its position is read
+  from Accessibility, which reports fractional coordinates, and truncating
+  them meant a Dock item sitting between two pixels flipped the overlay
+  back and forth by one pixel many times a second.
+- Windows packaging no longer fails on pull requests. The MSIX manifest
+  took its version from the display version, which carries a suffix on
+  anything but a tag, and the schema admits four integers and nothing else.
+
 ## [1.0.0] - 2026-08-14
 
 First public release.

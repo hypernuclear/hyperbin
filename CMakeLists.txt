@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.16)
 # older versions would drag back in.
 set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS version")
 
-project(hyperbin VERSION 1.0.0 LANGUAGES CXX)
+project(hyperbin VERSION 1.1.0 LANGUAGES CXX)
 
 if(APPLE)
     enable_language(OBJC)

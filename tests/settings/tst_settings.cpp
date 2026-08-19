@@ -85,6 +85,37 @@ private slots:
         s.clearStore();
     }
 
+    // First-run defaults happen ONCE and are remembered.
+    //
+    // The property that matters is not "is the login item on" but "does it
+    // stay off once someone turns it off". main.cpp registers the login
+    // item at first run and records the fact here; guarded instead by "is
+    // it registered already", it would re-enable itself on the next launch
+    // after a deliberate opt-out, which is the app overruling a decision
+    // made in its own menu. Once is a default; every launch is a fight.
+    void firstRun_happensOnceAndIsRemembered()
+    {
+        const QString store = QStringLiteral("hyperbin-firstrun");
+        {
+            Settings s(nullptr, store);
+            s.clearStore();
+        }
+        {
+            Settings s(nullptr, store);
+            QVERIFY2(!s.firstRunDone(),
+                     "a fresh install claims first run is already done");
+            s.setFirstRunDone();
+            QVERIFY2(s.firstRunDone(), "first run does not record itself");
+        }
+        {
+            // A second launch has to see it, or the login item is
+            // re-registered behind the user's back every time.
+            Settings s(nullptr, store);
+            const bool ok = s.firstRunDone();
+            s.clearStore();
+            QVERIFY2(ok, "the first-run flag does not survive a restart");
+        }
+    }
     // A menu-bar app is killed far more often than it is quit — the
     // debugger's stop button, a logout, Force Quit — so "saved when we
     // exit cleanly" is not saved at all.

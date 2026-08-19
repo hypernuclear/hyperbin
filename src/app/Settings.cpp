@@ -22,6 +22,7 @@ Settings::Settings(QObject *parent, const QString &appName)
     , m_store(QStringLiteral("Hypernuclear"), appName)
 {
     m_enabled   = m_store.value(QStringLiteral("enabled"), true).toBool();
+    m_firstRunDone = m_store.value(QStringLiteral("firstRunDone"), false).toBool();
     // Migration: the first build stored an enum ordinal under "type", and
     // only one value was ever written. Drop it; an unset infestation means
     // "whatever the registry considers default", which is the same thing.
@@ -98,6 +99,14 @@ void Settings::setLowPower(LowPower m)
     flush();
     emit lowPowerChanged(m);
 }
+void Settings::setFirstRunDone()
+{
+    if (m_firstRunDone)
+        return;
+    m_firstRunDone = true;
+    m_store.setValue(QStringLiteral("firstRunDone"), true);
+    flush();
+}
 void Settings::setDensity(Density d)
 {
     if (d == m_density)
@@ -105,6 +114,7 @@ void Settings::setDensity(Density d)
     m_density = d;
     m_store.setValue(QStringLiteral("density"), int(d));
     flush();
+    emit densityChanged(d);
     emit appearanceChanged();
 }
 
@@ -115,6 +125,7 @@ void Settings::setThreshold(Threshold t)
     m_threshold = t;
     m_store.setValue(QStringLiteral("threshold"), int(t));
     flush();
+    emit thresholdChanged(t);
     emit appearanceChanged();
 }
 

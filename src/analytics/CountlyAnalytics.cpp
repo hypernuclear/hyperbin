@@ -23,7 +23,10 @@ CountlyAnalytics::CountlyAnalytics(const QString &appKey, const QString &serverU
     // Default false. The one place the opt-in default is decided, and it
     // is decided by the absence of a stored value rather than by any
     // first-run code that might not run.
-    m_enabled.store(m_store.value(QStringLiteral("analyticsEnabled"), false).toBool());
+    // ON by default. The switch is still in the menu and still writes
+    // through to this key, so anyone who turns it off stays off — what
+    // changed is only which way an install starts.
+    m_enabled.store(m_store.value(QStringLiteral("analyticsEnabled"), true).toBool());
 
     // Bring the SDK up here when the user opted in on a previous run.
     //

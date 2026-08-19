@@ -63,6 +63,10 @@ signals:
     void updateCheckRequested();
     /// "Share Usage Data" was ticked or unticked.
     void analyticsToggled(bool on);
+    /// "Open at Login" was toggled, carrying what the SYSTEM ended up
+    /// doing rather than what was asked — registering can fail, and an
+    /// event recording the request would quietly overcount.
+    void loginItemToggled(bool on);
 
 private:
     void build();

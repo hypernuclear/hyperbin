@@ -183,7 +183,7 @@ endif()
 # ships inside every binary — but this repo is public, and a key sitting
 # in a public tree is an invitation to write junk into the dashboard. So
 # CI passes it from a secret and local builds simply have no backend.
-option(HYPERBIN_ANALYTICS "Include opt-in usage analytics (Countly)" ON)
+option(HYPERBIN_ANALYTICS "Include usage analytics (Countly), on by default at runtime" ON)
 set(HYPERBIN_COUNTLY_APP_KEY "" CACHE STRING "Countly app key; CI passes this")
 set(HYPERBIN_COUNTLY_SERVER "https://analytics.hypernuclear.com" CACHE STRING
     "Countly server URL")

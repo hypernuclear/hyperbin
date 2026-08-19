@@ -256,7 +256,8 @@ src/render/     EffectItem, the host that clocks an effect and hands it
                 the bin's geometry, artwork and silhouette
 src/update/     Sparkle (macOS) and WinSparkle (Windows), behind one
                 AppUpdater interface; a null one everywhere else
-src/analytics/  opt-in Countly reporting, behind one Analytics interface
+src/analytics/  Countly reporting (on by default, switchable off),
+                behind one Analytics interface
 packaging/      Windows installer + MSIX manifest, macOS DMG artwork
 shaders/        fly mask (baked .qsb) and the ooze's Quick3D snippets
 qml/            tray glyph and the ooze's Quick3D scene

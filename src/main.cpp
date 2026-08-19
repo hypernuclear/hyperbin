@@ -1,4 +1,5 @@
 #include "app/Settings.h"
+#include "platform/LaunchAtLogin.h"
 #include "app/TrayMenu.h"
 #include "core/PowerPolicy.h"
 #include "platform/LowPower.h"
@@ -413,6 +414,24 @@ int main(int argc, char **argv)
     }
 
     // --- menu-bar item --------------------------------------------------
+    // FIRST RUN ONLY: start at login, on by default.
+    //
+    // Guarded by a stored flag rather than by "is it registered already",
+    // and the difference is the whole point. Registering whenever it is
+    // found unregistered would re-enable it on the next launch after
+    // somebody deliberately turned it off, which is the app overruling a
+    // decision the user made in its own menu. Once is a default; every
+    // launch is a fight.
+    //
+    // The flag is set whatever the registration returns, so a failure —
+    // an unsigned or relocated bundle on macOS, an unwritable Startup
+    // folder on Windows — is not retried forever.
+    if (!settings.firstRunDone()) {
+        if (launchAtLogin::supported())
+            launchAtLogin::setEnabled(true);
+        settings.setFirstRunDone();
+    }
+
     TrayMenu tray(&settings);
     if (!tray.available())
         qWarning("hyperbin: no system tray is available; the app is running "
@@ -557,7 +576,16 @@ int main(int argc, char **argv)
     // automatic version is for the introduction nobody asked for; the
     // manual one is for someone who went looking, and taking it away from
     // them on a timer would be rude.
+    // Declared here, created further down: the splash lambda below wants
+    // to report itself, and it is defined before the analytics service
+    // exists. Null until then, which also settles what happens to the
+    // splash shown AT LAUNCH — it is not counted, and should not be,
+    // because kLaunch already records that exact moment. What this
+    // measures is somebody choosing "Show Splash" from the menu.
+    Analytics *analytics = nullptr;
     auto showSplash = [&](int dwellMs) {
+        if (analytics)
+            analytics->event(Ev::kSplashShown);
         if (!splashWindow)
             splashWindow = qobject_cast<QQuickWindow *>(splashComponent.create());
         if (!splashWindow) {
@@ -630,7 +658,7 @@ int main(int argc, char **argv)
     // Null when no app key was compiled in, which is every local build.
     // Opt-in: created here, but it sends nothing at all until the menu
     // switch is turned on, and the switch starts off.
-    Analytics *analytics = Analytics::create(&app);
+    analytics = Analytics::create(&app);
     if (analytics) {
         tray.setAnalyticsState(true, analytics->enabled());
         QObject::connect(&tray, &TrayMenu::analyticsToggled, analytics,
@@ -671,6 +699,45 @@ int main(int argc, char **argv)
                              prev = n;
                              if (was > 0 && n == 0)
                                  analytics->event(Ev::kEmptied);
+                         });
+        // The rest of the menu. Every one of these names was already
+        // declared in Analytics.h and none of them was ever fired: five
+        // of the nine events existed only as constants, so the dashboard
+        // showed four lines and looked complete. Two were dead because
+        // Settings had no signal to hang them on, which is why it has one
+        // now.
+        QObject::connect(&settings, &Settings::densityChanged, analytics,
+                         [analytics](Settings::Density d) {
+                             analytics->event(Ev::kDensity,
+                                              {{"density", int(d)}});
+                         });
+        QObject::connect(&settings, &Settings::thresholdChanged, analytics,
+                         [analytics](Settings::Threshold t) {
+                             analytics->event(Ev::kThreshold,
+                                              {{"threshold", int(t)}});
+                         });
+        QObject::connect(&settings, &Settings::lowPowerChanged, analytics,
+                         [analytics](Settings::LowPower m) {
+                             analytics->event(Ev::kLowPower,
+                                              {{"mode", int(m)}});
+                         });
+        QObject::connect(&tray, &TrayMenu::loginItemToggled, analytics,
+                         [analytics](bool on) {
+                             analytics->event(Ev::kLoginItem,
+                                              {{"on", on ? "1" : "0"}});
+                         });
+        // Permission GRANTED, not permission needed. The interesting
+        // number is how many people get through the Accessibility prompt,
+        // and that is a transition rather than a state — reported when
+        // the target stops being blocked, once per transition.
+        QObject::connect(target.get(), &TrashTarget::statusChanged, analytics,
+                         [analytics, blocked = false]
+                         (TrashTarget::Status s) mutable {
+                             const bool now =
+                                 s == TrashTarget::Status::PermissionRequired;
+                             if (blocked && !now)
+                                 analytics->event(Ev::kPermission);
+                             blocked = now;
                          });
     }
 

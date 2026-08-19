@@ -1,9 +1,15 @@
-// Opt-in usage analytics.
+// Usage analytics, ON by default and switchable off.
 //
-// Off until the user turns it on, and off is the real thing: the SDK is
-// not initialised, no device ID is computed, and no request is made. The
-// switch is in the menu bar next to everything else the app can be told
-// to stop doing.
+// Off is the real thing: the SDK is not initialised, no device ID is
+// computed, and no request is made. The switch is in the menu bar next to
+// everything else the app can be told to stop doing, and once somebody
+// turns it off it stays off — the default only decides how an install
+// starts.
+//
+// This was opt-in until 2026-08-18. Anywhere that requires consent before
+// non-essential analytics — the EU is the obvious one — an opt-out default
+// is not sufficient on its own, and the first-run disclosure has to carry
+// the consent instead.
 //
 // What gets sent is deliberately thin — which effect is running, how
 // often the bin gets emptied, what platform this is. There is nothing
@@ -31,7 +37,7 @@ public:
     /// switch that does nothing.
     static Analytics *create(QObject *parent = nullptr);
 
-    /// Whether the user has opted in. Persisted.
+    /// Whether collection is on. Persisted, and on unless turned off.
     virtual bool enabled() const = 0;
 
     /// Turn collection on or off. Turning it on initialises the SDK on
@@ -67,6 +73,7 @@ inline constexpr auto kLoginItem   = "login_item_toggled";
 inline constexpr auto kEmptied     = "bin_emptied";
 inline constexpr auto kPermission  = "permission_granted";
 inline constexpr auto kSplashShown = "splash_shown";
+inline constexpr auto kLowPower    = "low_power_changed";
 } // namespace Ev
 
 /// User-property keys, same reasoning as the event names.

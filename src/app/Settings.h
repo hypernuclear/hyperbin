@@ -82,18 +82,34 @@ public:
     /// Fixed densities ignore both arguments — that's the point of them.
     double fullnessFor(qint64 trashBytes, int itemCount) const;
 
+    /// Whether first-run setup has already happened. Guards anything the
+    /// app does to the user's machine ONCE — see main.cpp, where it is
+    /// what stops the login item being re-registered on every launch
+    /// after someone has deliberately turned it off.
+    bool firstRunDone() const { return m_firstRunDone; }
+    void setFirstRunDone();
 signals:
     void enabledChanged(bool on);
     void lowPowerChanged(LowPower m);
     void infestationChanged(const QString &id);
     /// Anything that changes how the swarm should look.
     void appearanceChanged();
+    /// The two appearance settings, reported individually as well.
+    ///
+    /// appearanceChanged() says "redraw"; these say WHICH knob moved, and
+    /// the difference matters to the one caller that wants to know —
+    /// analytics. Nine event names were declared in Analytics.h and only
+    /// four were ever fired, and two of the dead ones were dead precisely
+    /// because there was no signal here to hang them on.
+    void densityChanged(Density d);
+    void thresholdChanged(Threshold t);
 
 private:
     /// Push the store to disk now. See the implementation for why every
     /// setter does this.
     void flush();
     QSettings m_store;
+    bool m_firstRunDone = false;
     bool      m_enabled;
     LowPower  m_lowPower;
     QString   m_infestation;

@@ -339,8 +339,11 @@ void TrayMenu::build()
             // macOS, an unwritable Startup folder on Windows — and a tick
             // that stays put regardless would be lying to the user.
             const bool actual = launchAtLogin::setEnabled(on);
-            QSignalBlocker b(m_login);
-            m_login->setChecked(actual);
+            {
+                QSignalBlocker b(m_login);
+                m_login->setChecked(actual);
+            }
+            emit loginItemToggled(actual);
         });
     }
 

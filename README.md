@@ -6,6 +6,16 @@ Free giveaway app for macOS and Windows. Direct download only.
 Cross-platform Qt 6.11 + C++. Two effects ship today — **Flies** and
 **Ooze** — picked from the menu-bar item.
 
+## Download & docs
+
+Grab the newest build from [hypernuclear.com/docs/hyperbin](https://hypernuclear.com/docs/hyperbin) —
+the docs page links every flavor (Apple Silicon / Intel, installer / MSIX)
+and covers install and permissions. (Direct links: [Apple
+Silicon](https://hypernuclear.com/hyperbin/download/mac) /
+[Intel](https://hypernuclear.com/hyperbin/download/mac/x64) /
+[Windows](https://hypernuclear.com/hyperbin/download/windows) /
+[MSIX](https://hypernuclear.com/hyperbin/download/windows/msix).)
+
 ## Status
 
 **macOS works end to end.** The overlay sits above the Dock, tracks the

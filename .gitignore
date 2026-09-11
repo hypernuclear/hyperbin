@@ -9,3 +9,6 @@ CMakeLists.txt.user*
 # Python bytecode from the generator scripts.
 __pycache__/
 *.pyc
+
+# agent workspace (plans, scratch)
+.hermes/

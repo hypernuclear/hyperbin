@@ -82,6 +82,11 @@ cmake --build build
 
 Ninja ships with Qt at `C:\Qt\Tools\Ninja` if it isn't already on PATH.
 
+The first configure needs the network. The app's typeface, Satoshi, can't
+be committed under its licence, so CMake downloads it from Fontshare into
+the build tree and compiles it in; without it the configure fails. Later
+configures of the same build tree reuse the copy (`THIRD-PARTY-NOTICES.md`).
+
 In Qt Creator on Windows, use a normal kit — *Desktop Qt 6.11.1 MSVC2022
 64bit* — not a "(CMake preset)" build configuration. Qt Creator derives a
 kit from every enabled preset, and a preset that names no compiler yields
@@ -230,8 +235,6 @@ forces it, which is how the prompt flow gets tested.
 
 ## Known gaps
 
-- **No onboarding.** Both macOS permissions have to be granted by hand;
-  nothing explains them to the user yet.
 - **The mask lags the Dock by a frame.** Flies pass behind the bin via a
   shader that erases them where the Trash artwork is opaque
   (`shaders/flymask.*`). Its position comes from the Accessibility poll,
@@ -289,5 +292,6 @@ So cloning this and building it with an open-source Qt gives you a
 GPLv3-encumbered binary even though the source is MIT. That is a property of
 Qt, not of this project.
 `THIRD-PARTY-NOTICES.md` has the per-module detail and covers Sparkle,
-WinSparkle, the Countly SDK and the Inter typeface.
+WinSparkle, the Countly SDK and the Satoshi typeface (fetched at build
+time, never committed).
 

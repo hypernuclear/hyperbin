@@ -29,6 +29,10 @@ void setAnimationActivity(bool active);
 /// below everything and stops it accepting focus, so a grab can happen
 /// while somebody else is working.
 void configurePreviewWindow(QWindow *w);
+/// Keep the window's title (for Mission Control, the Window menu and
+/// VoiceOver) but don't draw it in the title bar: for a window whose
+/// artwork runs up under the bar, where the text sat on the illustration.
+void hideWindowTitle(QWindow *w);
 /// Bring the app forward so a window it has just opened is actually seen.
 ///
 /// An LSUIElement agent has no Dock icon and is not in the activation

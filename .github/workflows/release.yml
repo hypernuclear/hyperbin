@@ -122,7 +122,9 @@ jobs:
           # "The packages ['qtsvg'] were not found while parsing XML" —
           # which reads like the package is missing rather than already
           # present. The tray icon and the marks still get QtSvg.
-          modules: qtshadertools qtquick3d
+          # qtimageformats for its WebP plugin: the welcome window plays
+          # the studio's product loops, which are animated WebP.
+          modules: qtshadertools qtquick3d qtimageformats
           # Qt 6.11+ on Windows uses a flattened per-arch repo layout that
           # aqtinstall 3.3.0 — the action's default, and the newest on
           # PyPI — cannot parse; it fails with "Failed to locate XML data
@@ -136,6 +138,17 @@ jobs:
       - name: Install Ninja
         if: runner.os == 'macOS'
         run: brew list ninja >/dev/null 2>&1 || brew install ninja
+
+      # Satoshi is downloaded from Fontshare at configure time and never
+      # committed (THIRD-PARTY-NOTICES.md). Cached here so builds don't
+      # depend on Fontshare being up: CMake finds the copy and skips the
+      # download. The cache is private to this repo's workflows, so the
+      # font isn't redistributed. Bump the key to fetch a fresh copy.
+      - name: Cache Satoshi
+        uses: actions/cache@v4
+        with:
+          path: build/_deps/satoshi
+          key: satoshi-v1
 
       - name: Configure
         shell: bash

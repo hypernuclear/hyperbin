@@ -46,6 +46,7 @@ function(hyperbin_fix_test_path)
 endfunction()
 
 add_subdirectory(flies)
+add_subdirectory(links)
 add_subdirectory(ooze)
 add_subdirectory(settings)
 add_subdirectory(tentacle)

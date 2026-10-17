@@ -59,6 +59,8 @@ signals:
     void remediationRequested();
     /// "Show Splash" was chosen.
     void splashRequested();
+    /// "Welcome to hyperbin…" was chosen.
+    void welcomeRequested();
     /// "Check for Updates…" was chosen.
     void updateCheckRequested();
     /// "Share Usage Data" was ticked or unticked.
@@ -97,6 +99,7 @@ private:
     QAction      *m_perms     = nullptr;
     QAction      *m_update    = nullptr;
     QAction      *m_analytics = nullptr;
+    QAction      *m_welcomeAtStartup = nullptr;
     QActionGroup *m_effectGroup = nullptr;
     QActionGroup *m_lowPowerGroup = nullptr;
     QActionGroup *m_densityGroup   = nullptr;

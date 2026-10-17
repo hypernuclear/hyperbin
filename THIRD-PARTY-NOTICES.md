@@ -43,13 +43,29 @@ even though this source is MIT.
 | [Sparkle](https://sparkle-project.org) | MIT | fetched at configure time (macOS updater) |
 | [WinSparkle](https://winsparkle.org) | MIT | fetched at configure time (Windows updater) |
 | [Countly C++ SDK](https://github.com/Countly/countly-sdk-cpp) | MIT | git submodule under `third_party/`; optional, `-DHYPERBIN_ANALYTICS=OFF` removes it |
-| Inter (`resources/Inter-SemiBold.ttf`) | SIL Open Font License 1.1 | committed |
+| Satoshi | ITF Free Font License | fetched at configure time, compiled in; never committed (below) |
+| [Ashima Arts' webgl-noise](https://github.com/ashima/webgl-noise) (3D simplex noise) | MIT, © 2011 Ashima Arts | copied into `shaders/buttonfire.frag`, with its notice; the welcome window's button fire |
 
-Inter's own name table records: *"This Font Software is licensed under the
-SIL Open Font License, Version 1.1"*, © 2016 The Inter Project Authors
-(https://github.com/rsms/inter). The OFL permits bundling in software; it
-forbids selling the font on its own and requires that any modified version
-not use the reserved name.
+### Platform marks
+
+`qml/PlatformMarks.qml` draws the Apple logo and the Windows logo beside
+each download in the welcome window, only to say which systems an app runs
+on. They are trademarks of Apple Inc. and Microsoft Corporation and are not
+covered by this repository's MIT licence.
+
+### Satoshi: fetched at build time, never committed
+
+The app sets all of its type (the splash and the welcome window) in
+Satoshi, by Indian Type Foundry, under the
+[ITF Free Font License](https://www.fontshare.com/licenses/itf-ffl) from
+[Fontshare](https://www.fontshare.com/fonts/satoshi). That licence allows
+embedding the font in an application but not redistributing the font files
+(through a repository, among other ways) or modifying them. So the files
+are not in this repository: CMake downloads Fontshare's own zip at
+configure time and compiles four of its OTFs, unmodified, into the binary.
+Whoever builds this gets their own copy from Fontshare under that licence.
+There is no fallback face: a configure that can't download it fails.
+Satoshi is not covered by this repository's MIT licence.
 
 ## Artwork drawn from the host
 

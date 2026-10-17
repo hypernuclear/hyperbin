@@ -74,6 +74,9 @@ TrayMenu::TrayMenu(Settings *settings, QObject *parent)
             [this] { syncFromSettings(); });
     connect(m_settings, &Settings::appearanceChanged, this,
             [this] { syncFromSettings(); });
+    // Unticked in the welcome window: keep the menu's tick in step.
+    connect(m_settings, &Settings::welcomeAtStartupChanged, this,
+            [this] { syncFromSettings(); });
 }
 
 TrayMenu::~TrayMenu() = default;
@@ -297,10 +300,14 @@ void TrayMenu::build()
     m_update = m_menu->addAction(QStringLiteral("Check for Updates…"));
     m_update->setVisible(false);
     connect(m_update, &QAction::triggered, this, &TrayMenu::updateCheckRequested);
+    // The version, the licence, the newsletter and the studio's other apps
+    // (qml/Welcome.qml) — the window startup shows, on demand.
+    auto *welcome = m_menu->addAction(QStringLiteral("Welcome to hyperbin…"));
+    connect(welcome, &QAction::triggered, this, &TrayMenu::welcomeRequested);
 
     // --- switches that outlive this session ---------------------------
-    // Both of these change what the app does when nobody is looking —
-    // one at login, one over the network — so they sit apart from the
+    // These change what the app does when nobody is looking — at login,
+    // at launch, over the network — so they sit apart from the
     // per-session controls above and directly above Quit, where a
     // settings group is conventionally found.
     m_menu->addSeparator();
@@ -347,9 +354,17 @@ void TrayMenu::build()
         });
     }
 
-    // Analytics, off unless switched on here. In the menu rather than
-    // behind an "Advanced" submenu: a data-collection setting the user
-    // has to go looking for is not really opt-in.
+    // Whether the welcome window opens after the splash at each launch. The
+    // window's own "Show at startup" box is the same setting.
+    m_welcomeAtStartup = m_menu->addAction(QStringLiteral("Show Welcome at Startup"));
+    m_welcomeAtStartup->setCheckable(true);
+    connect(m_welcomeAtStartup, &QAction::triggered, m_settings,
+            &Settings::setWelcomeAtStartup);
+
+    // Analytics, on by default and switched off here (or in the welcome
+    // window). In the menu rather than behind an "Advanced" submenu: a
+    // data-collection setting the user has to go looking for is no real
+    // choice at all.
     //
     // Hidden on a build with no analytics backend, same reasoning as
     // "Open at Login" above.
@@ -370,6 +385,7 @@ void TrayMenu::syncFromSettings()
 {
     QSignalBlocker b(m_enable);
     m_enable->setChecked(m_settings->enabled());
+    m_welcomeAtStartup->setChecked(m_settings->welcomeAtStartup());
 
     auto check = [](QActionGroup *g, int value) {
         for (QAction *a : g->actions())

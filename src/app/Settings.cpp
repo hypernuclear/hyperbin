@@ -23,6 +23,8 @@ Settings::Settings(QObject *parent, const QString &appName)
 {
     m_enabled   = m_store.value(QStringLiteral("enabled"), true).toBool();
     m_firstRunDone = m_store.value(QStringLiteral("firstRunDone"), false).toBool();
+    m_welcomeShown = m_store.value(QStringLiteral("welcomeShown"), false).toBool();
+    m_welcomeAtStartup = m_store.value(QStringLiteral("welcomeAtStartup"), true).toBool();
     // Migration: the first build stored an enum ordinal under "type", and
     // only one value was ever written. Drop it; an unset infestation means
     // "whatever the registry considers default", which is the same thing.
@@ -106,6 +108,23 @@ void Settings::setFirstRunDone()
     m_firstRunDone = true;
     m_store.setValue(QStringLiteral("firstRunDone"), true);
     flush();
+}
+void Settings::setWelcomeShown()
+{
+    if (m_welcomeShown)
+        return;
+    m_welcomeShown = true;
+    m_store.setValue(QStringLiteral("welcomeShown"), true);
+    flush();
+}
+void Settings::setWelcomeAtStartup(bool on)
+{
+    if (on == m_welcomeAtStartup)
+        return;
+    m_welcomeAtStartup = on;
+    m_store.setValue(QStringLiteral("welcomeAtStartup"), on);
+    flush();
+    emit welcomeAtStartupChanged(on);
 }
 void Settings::setDensity(Density d)
 {

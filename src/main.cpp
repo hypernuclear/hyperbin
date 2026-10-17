@@ -7,8 +7,11 @@
 #include "render/EffectItem.h"
 #include "update/AppUpdater.h"
 #include "analytics/Analytics.h"
+#include "app/WelcomeBridge.h"
 
 #include <QApplication>
+#include <QDir>
+#include <QFontDatabase>
 #include <QLocale>
 #include <QPainter>
 #include <QSvgRenderer>
@@ -125,6 +128,14 @@ int main(int argc, char **argv)
     // empty or the animation is switched off.
     QApplication::setQuitOnLastWindowClosed(false);
 
+    // Satoshi, the app's one typeface, compiled in from the build's own
+    // Fontshare download (CMakeLists.txt). Registered before any QML loads,
+    // so every window names "Satoshi" and picks a cut by font.weight.
+    for (const QString &cut : QDir(QStringLiteral(":/fonts")).entryList({QStringLiteral("*.otf")})) {
+        if (QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/") + cut) < 0)
+            qWarning("hyperbin: could not load font %s", qPrintable(cut));
+    }
+
     // Dev mode: a normal window instead of a click-through overlay, so
     // the simulation can be iterated on without fighting the shell.
     const bool windowed = app.arguments().contains(QStringLiteral("--windowed"));
@@ -190,6 +201,68 @@ int main(int argc, char **argv)
         //
         //   HYPERBIN_PREVIEW=ooze ./hyperbin --windowed
         const QString preview = qEnvironmentVariable("HYPERBIN_PREVIEW");
+
+        // HYPERBIN_PREVIEW_SHOT=<path> grabs the window and exits, so a
+        // change to an effect's look can be seen without hunting for the
+        // right window on screen — which is its own source of wrong
+        // conclusions.
+        const QString shot = qEnvironmentVariable("HYPERBIN_PREVIEW_SHOT");
+        auto grabAndQuit = [&shot](QQuickWindow *target) {
+            // Out of the way. A grab-and-exit run needs the window
+            // rendered, not focused, and this harness gets run dozens of
+            // times in a row while somebody is working in another app —
+            // left alone it steals focus and stacks on top every single
+            // time. Qt's own flags are not enough on macOS, where
+            // activation belongs to the application rather than the
+            // window, so the native side does the rest.
+            target->setFlags(target->flags() | Qt::WindowDoesNotAcceptFocus
+                             | Qt::WindowStaysOnBottomHint);
+#if defined(Q_OS_MACOS)
+            configurePreviewWindow(target);
+#endif
+            // HYPERBIN_PREVIEW_SHOT_MS moves the grab in time. Two grabs
+            // at different moments is the only way to tell an animation
+            // that is running from one that is merely present in the
+            // shader — twice this session a "subtle" motion turned out to
+            // be no motion at all.
+            const int at = qEnvironmentVariableIntValue("HYPERBIN_PREVIEW_SHOT_MS");
+            QTimer::singleShot(at > 0 ? at : 2500, target, [target, shot] {
+                const QImage img = target->grabWindow();
+                if (img.save(shot))
+                    qInfo("hyperbin: preview written to %s", qPrintable(shot));
+                else
+                    qWarning("hyperbin: could not write %s", qPrintable(shot));
+                QCoreApplication::quit();
+            });
+        };
+
+        // HYPERBIN_PREVIEW=welcome opens the welcome window instead: the
+        // real one, with the app's fonts, art and bridge, not a copy in a
+        // harness. Grabbed like an effect.
+        if (preview == QLatin1String("welcome")) {
+            win->hide();
+            WelcomeBridge welcomeBridge;
+            welcomeBridge.setSettings(&settings);
+            engine.rootContext()->setContextProperty(QStringLiteral("welcome"), &welcomeBridge);
+            QQmlComponent welcomeComponent(
+                &engine, QUrl(QStringLiteral("qrc:/qt/qml/hyperbin/qml/Welcome.qml")));
+            auto *welcomeWindow = qobject_cast<QQuickWindow *>(welcomeComponent.create());
+            if (!welcomeWindow) {
+                qWarning("hyperbin: welcome window failed to load: %s",
+                         qPrintable(welcomeComponent.errorString()));
+                return -1;
+            }
+#if defined(Q_OS_MACOS)
+            hideWindowTitle(welcomeWindow);
+#endif
+            if (!shot.isEmpty())
+                grabAndQuit(welcomeWindow);
+            welcomeWindow->show();
+            const int rc = app.exec();
+            delete welcomeWindow;   // before the bridge its bindings read
+            return rc;
+        }
+
         if (!preview.isEmpty())
             fx->setEffectId(preview);
         // The SHELL's artwork, not our own mark. The app's glyph is a
@@ -213,39 +286,8 @@ int main(int argc, char **argv)
         }
         if (!icon.isNull())
             fx->setBinIcon(icon);
-        // HYPERBIN_PREVIEW_SHOT=<path> grabs the window and exits, so a
-        // change to an effect's look can be seen without hunting for the
-        // right window on screen — which is its own source of wrong
-        // conclusions.
-        const QString shot = qEnvironmentVariable("HYPERBIN_PREVIEW_SHOT");
-        if (!shot.isEmpty()) {
-            // Out of the way. A grab-and-exit run needs the window
-            // rendered, not focused, and this harness gets run dozens of
-            // times in a row while somebody is working in another app —
-            // left alone it steals focus and stacks on top every single
-            // time. Qt's own flags are not enough on macOS, where
-            // activation belongs to the application rather than the
-            // window, so the native side does the rest.
-            win->setFlags(win->flags() | Qt::WindowDoesNotAcceptFocus
-                          | Qt::WindowStaysOnBottomHint);
-#if defined(Q_OS_MACOS)
-            configurePreviewWindow(win);
-#endif
-            // HYPERBIN_PREVIEW_SHOT_MS moves the grab in time. Two grabs
-            // at different moments is the only way to tell an animation
-            // that is running from one that is merely present in the
-            // shader — twice this session a "subtle" motion turned out to
-            // be no motion at all.
-            const int at = qEnvironmentVariableIntValue("HYPERBIN_PREVIEW_SHOT_MS");
-            QTimer::singleShot(at > 0 ? at : 2500, win, [win, shot] {
-                const QImage img = win->grabWindow();
-                if (img.save(shot))
-                    qInfo("hyperbin: preview written to %s", qPrintable(shot));
-                else
-                    qWarning("hyperbin: could not write %s", qPrintable(shot));
-                QCoreApplication::quit();
-            });
-        }
+        if (!shot.isEmpty())
+            grabAndQuit(win);
         return app.exec();
     }
 
@@ -557,6 +599,65 @@ int main(int argc, char **argv)
         if (!p.granted)
             permissionsMissing = true;
 
+    // --- welcome ------------------------------------------------------------
+    // One window (qml/Welcome.qml): shown by itself at startup, after the
+    // splash and whatever permissions are missing, until the user unticks
+    // "Show at startup" (in the window, or the menu's Show Welcome at
+    // Startup), and on demand from the menu's "Welcome to hyperbin…". It
+    // carries the version and licence, the newsletter sign-up, the studio's
+    // other apps, and the usage-data disclosure.
+    WelcomeBridge welcomeBridge;
+    welcomeBridge.setSettings(&settings);
+    engine.rootContext()->setContextProperty(QStringLiteral("welcome"), &welcomeBridge);
+    QQmlComponent welcomeComponent(
+        &engine, QUrl(QStringLiteral("qrc:/qt/qml/hyperbin/qml/Welcome.qml")));
+    QPointer<QQuickWindow> welcomeWindow;
+    // `how` is only what analytics counts: "first_run", "startup" or "menu".
+    // The window is the same every time.
+    auto showWelcome = [&](const QString &how) {
+        if (!welcomeWindow) {
+            welcomeWindow = qobject_cast<QQuickWindow *>(welcomeComponent.create());
+#if defined(Q_OS_MACOS)
+            hideWindowTitle(welcomeWindow);
+#endif
+        }
+        if (!welcomeWindow) {
+            qWarning("hyperbin: welcome window failed to load: %s",
+                     qPrintable(welcomeComponent.errorString()));
+            return;
+        }
+        // The login item may have changed in System Settings since the
+        // window was last up.
+        welcomeBridge.refreshOpenAtLogin();
+        welcomeWindow->show();
+        welcomeWindow->raise();
+        welcomeWindow->requestActivate();
+#if defined(Q_OS_MACOS)
+        // Same reason as the permissions window: an accessory app's window
+        // otherwise opens behind whatever the user was doing.
+        activateApp();
+#endif
+        welcomeBridge.shown(how);
+    };
+    // The first showing is told apart from the rest only for the count.
+    auto showStartupWelcome = [&] {
+        if (!settings.welcomeAtStartup())
+            return;
+        const bool first = !settings.welcomeShown();
+        settings.setWelcomeShown();
+        showWelcome(first ? QStringLiteral("first_run") : QStringLiteral("startup"));
+    };
+    QObject::connect(&tray, &TrayMenu::welcomeRequested, &app,
+                     [&] { showWelcome(QStringLiteral("menu")); });
+    // Open at Login flipped in the menu: the window's switch follows. (The
+    // other way needs nothing: the menu reads the system each time it opens.)
+    QObject::connect(&tray, &TrayMenu::loginItemToggled, &welcomeBridge,
+                     [&] { welcomeBridge.refreshOpenAtLogin(); });
+    // The window goes before the bridge its bindings read: left to the
+    // engine, it outlives the bridge and every binding fails on the way out.
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, &app,
+                     [&] { delete welcomeWindow; });
+
     // --- the brand moment -------------------------------------------------
     // Every launch, not just the first. This is a menu-bar agent: it is
     // started once at login and then not thought about again, so "once
@@ -617,15 +718,29 @@ int main(int argc, char **argv)
     // The permissions window comes after, never over. They would stack,
     // and the point of a brand moment is that it is the only thing on
     // screen.
-    if (permissionsMissing) {
+    //
+    // The welcome comes last: after the permissions window if that is up
+    // (it is what makes the app work, so it goes first), else straight
+    // after the splash.
+    auto afterSplash = [&, permissionsMissing] {
+        if (!permissionsMissing) {
+            showStartupWelcome();
+            return;
+        }
+        showPermissions();
+        if (permWindow && settings.welcomeAtStartup())
+            QObject::connect(permWindow, &QWindow::visibleChanged, &app,
+                             [&](bool vis) { if (!vis) showStartupWelcome(); });
+    };
+    if (permissionsMissing || settings.welcomeAtStartup()) {
         if (splashWindow && splashWindow->isVisible())
             QObject::connect(splashWindow, &QWindow::visibleChanged, &app,
-                             [showPermissions](bool vis) {
+                             [afterSplash](bool vis) {
                                  if (!vis)
-                                     showPermissions();
+                                     afterSplash();
                              });
         else
-            showPermissions();
+            afterSplash();
     }
     // The menu bar's problem line opens the window rather than jumping
     // straight to a settings pane: when two permissions are missing, a
@@ -656,13 +771,18 @@ int main(int argc, char **argv)
 
     // --- analytics --------------------------------------------------------
     // Null when no app key was compiled in, which is every local build.
-    // Opt-in: created here, but it sends nothing at all until the menu
-    // switch is turned on, and the switch starts off.
+    // On by default (src/analytics/Analytics.h); off means nothing is sent
+    // at all. The switch is in the menu and in the welcome window.
     analytics = Analytics::create(&app);
+    welcomeBridge.setAnalytics(analytics);
     if (analytics) {
         tray.setAnalyticsState(true, analytics->enabled());
         QObject::connect(&tray, &TrayMenu::analyticsToggled, analytics,
                          [analytics](bool on) { analytics->setEnabled(on); });
+        // The welcome window's switch is the same switch: keep the menu's
+        // tick in step when it is flipped there.
+        QObject::connect(analytics, &Analytics::enabledChanged, &tray,
+                         [&tray](bool on) { tray.setAnalyticsState(true, on); });
         // Describe the install once it is allowed to be described, which
         // is both at startup (if already opted in) and at the moment
         // somebody opts in mid-session.
@@ -724,6 +844,12 @@ int main(int argc, char **argv)
         QObject::connect(&tray, &TrayMenu::loginItemToggled, analytics,
                          [analytics](bool on) {
                              analytics->event(Ev::kLoginItem,
+                                              {{"on", on ? "1" : "0"}});
+                         });
+        // From the window's box or the menu's tick: the same setting.
+        QObject::connect(&settings, &Settings::welcomeAtStartupChanged, analytics,
+                         [analytics](bool on) {
+                             analytics->event(Ev::kWelcomeAtStartup,
                                               {{"on", on ? "1" : "0"}});
                          });
         // Permission GRANTED, not permission needed. The interesting

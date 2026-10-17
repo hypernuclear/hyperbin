@@ -74,6 +74,13 @@ inline constexpr auto kEmptied     = "bin_emptied";
 inline constexpr auto kPermission  = "permission_granted";
 inline constexpr auto kSplashShown = "splash_shown";
 inline constexpr auto kLowPower    = "low_power_changed";
+// The welcome window (qml/Welcome.qml). The sign-up is counted, the
+// address never: it goes to hypernuclear.com and nowhere else.
+inline constexpr auto kWelcomeShown = "welcome_shown";
+inline constexpr auto kWelcomeAtStartup = "welcome_at_startup_toggled";
+inline constexpr auto kNewsletter   = "newsletter_submitted";
+inline constexpr auto kPromoClicked = "promo_clicked";
+inline constexpr auto kLinkOpened   = "website_link_opened";
 } // namespace Ev
 
 /// User-property keys, same reasoning as the event names.

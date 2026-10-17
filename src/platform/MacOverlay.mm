@@ -86,6 +86,15 @@ void configurePreviewWindow(QWindow *w)
     // undo the level for as long as the app is active.
     [win orderBack:nil];
 }
+void hideWindowTitle(QWindow *w)
+{
+    if (!w)
+        return;
+    w->create();
+    NSView *view = reinterpret_cast<NSView *>(w->winId());
+    if (NSWindow *win = view.window)
+        win.titleVisibility = NSWindowTitleHidden;
+}
 void activateApp()
 {
     [NSApp activateIgnoringOtherApps:YES];

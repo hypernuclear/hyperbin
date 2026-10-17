@@ -88,8 +88,23 @@ public:
     /// after someone has deliberately turned it off.
     bool firstRunDone() const { return m_firstRunDone; }
     void setFirstRunDone();
+
+    /// Whether the welcome window (qml/Welcome.qml) has ever been shown on
+    /// its own. Only tells the first showing from the ones after it (the
+    /// window's mode, and what analytics counts). Separate from firstRunDone
+    /// on purpose: installs that ran before the window existed have
+    /// firstRunDone set, and their first welcome is still a first.
+    bool welcomeShown() const { return m_welcomeShown; }
+    void setWelcomeShown();
+
+    /// Whether the welcome window opens by itself at startup, after the
+    /// splash. On until the user unticks it, in the window or in the menu
+    /// ("Show Welcome at Startup"); "Welcome to hyperbin…" opens it either way.
+    bool welcomeAtStartup() const { return m_welcomeAtStartup; }
+    void setWelcomeAtStartup(bool on);
 signals:
     void enabledChanged(bool on);
+    void welcomeAtStartupChanged(bool on);
     void lowPowerChanged(LowPower m);
     void infestationChanged(const QString &id);
     /// Anything that changes how the swarm should look.
@@ -110,6 +125,8 @@ private:
     void flush();
     QSettings m_store;
     bool m_firstRunDone = false;
+    bool m_welcomeShown = false;
+    bool m_welcomeAtStartup = true;
     bool      m_enabled;
     LowPower  m_lowPower;
     QString   m_infestation;

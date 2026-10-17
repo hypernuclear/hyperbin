@@ -116,6 +116,55 @@ private slots:
             QVERIFY2(ok, "the first-run flag does not survive a restart");
         }
     }
+    // The welcome window opens on its own exactly once, and that holds for
+    // an install whose first run happened before the window existed: its
+    // firstRunDone is set, and it must still see the window once.
+    void welcome_showsOnceEvenAfterAnEarlierFirstRun()
+    {
+        const QString store = QStringLiteral("hyperbin-welcome");
+        {
+            Settings s(nullptr, store);
+            s.clearStore();
+            s.setFirstRunDone();
+        }
+        {
+            Settings s(nullptr, store);
+            QVERIFY2(!s.welcomeShown(),
+                     "an existing install skips the welcome it has never seen");
+            s.setWelcomeShown();
+            QVERIFY2(s.welcomeShown(), "showing the welcome does not record itself");
+        }
+        {
+            Settings s(nullptr, store);
+            const bool ok = s.welcomeShown();
+            s.clearStore();
+            QVERIFY2(ok, "the welcome flag does not survive a restart");
+        }
+    }
+    // The welcome opens at every startup until it is switched off, and
+    // switched off stays off.
+    void welcome_atStartupDefaultsOnAndPersistsOff()
+    {
+        const QString store = QStringLiteral("hyperbin-welcome-startup");
+        {
+            Settings s(nullptr, store);
+            s.clearStore();
+        }
+        {
+            Settings s(nullptr, store);
+            QVERIFY2(s.welcomeAtStartup(), "the welcome starts switched off");
+            QSignalSpy spy(&s, &Settings::welcomeAtStartupChanged);
+            s.setWelcomeAtStartup(false);
+            s.setWelcomeAtStartup(false);
+            QCOMPARE(spy.count(), 1);
+        }
+        {
+            Settings s(nullptr, store);
+            const bool on = s.welcomeAtStartup();
+            s.clearStore();
+            QVERIFY2(!on, "switching the welcome off does not survive a restart");
+        }
+    }
     // A menu-bar app is killed far more often than it is quit — the
     // debugger's stop button, a logout, Force Quit — so "saved when we
     // exit cleanly" is not saved at all.

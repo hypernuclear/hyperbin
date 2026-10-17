@@ -25,10 +25,6 @@ Window {
     readonly property color brandGreen: "#72f987"
     readonly property color brandInk: "#0d1a0f"
 
-    // Bundled, not requested by name: the system UI face is what a
-    // missing font quietly becomes, and it looks close enough to Inter
-    // that nobody would notice the panel had gone generic.
-    FontLoader { id: inter; source: "qrc:/icons/Inter-SemiBold.ttf" }
 
     // Sized from the artwork's own aspect so it is never letterboxed or
     // cropped, at roughly half its pixel size — the source is 1280x960,
@@ -182,8 +178,10 @@ Window {
             Text {
                 text: "v" + Qt.application.version
                 color: root.brandInk
-                font.family: inter.name
-                font.weight: Font.DemiBold
+                // Compiled in and registered by main.cpp; the build fails
+                // without it, so this never quietly becomes the system face.
+                font.family: "Satoshi"
+                font.weight: Font.Bold
                 font.pixelSize: panel.height * 0.21653
                 anchors.right: lockup.right
                 anchors.top: lockup.bottom

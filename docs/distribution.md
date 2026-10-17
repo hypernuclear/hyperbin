@@ -208,19 +208,42 @@ what every local build does.
 
 ## Analytics, and what is actually collected
 
-Off by default, and off means the SDK is never initialised, no device id
-is computed, and no request is made. Verified by running a build with a
-real app key against a local HTTP sink: zero requests while opted out.
+On by default (it was opt-in until 2026-08-18), and off means the SDK is
+never initialised, no device id is computed, and no request is made.
+Verified by running a build with a real app key against a local HTTP
+sink: zero requests while opted out.
 
 The switch is "Share Usage Data" in the menu bar, next to the other
-things the app can be told to stop doing.
+things the app can be told to stop doing, and the same switch sits in
+the welcome window (qml/Welcome.qml), which is where first run discloses
+it.
 
 When on, what goes out is: which effect is running, density and
 threshold changes, whether the bin got emptied, the app version, and the
-OS and its version. The device id is a SHA-256 of a hardware
-identifier — one-way, so it distinguishes machines without identifying
-one. There is nothing about file names, paths, or bin contents, and no
-code path that could send them.
+OS and its version — plus, from the welcome window, that it was shown,
+that a newsletter sign-up was accepted, which product card was opened,
+and which place in the app a website link was opened from. The device id
+is a SHA-256 of a hardware identifier — one-way, so it distinguishes
+machines without identifying one. There is nothing about file names,
+paths, or bin contents, and no code path that could send them.
+
+## What the welcome window sends
+
+Separate from analytics, and on whatever the switch says:
+
+- **The newsletter email, only when Subscribe is pressed**, to
+  `hypernuclear.com/api/newsletter/signup` with `source=hyperbin_app`. The
+  site's double opt-in sends one confirmation email and stores nothing
+  until its link is clicked. Analytics records that a sign-up happened,
+  never the address.
+- **The store request**, `hypernuclear.com/api/v1/store?app=hyperbin`, each
+  time the window opens, carrying the app version and platform. It
+  returns the other apps' words and any running sale; offline, the
+  window falls back to built-in copy.
+- **Website links are tagged** `utm_source=hyperbin&utm_medium=app&utm_campaign=<welcome|about>`
+  (src/app/WebsiteLinks.h, the same rules as hypershot's). Anything that
+  could carry something private — `/activate`, `/api/`, checkout, other
+  hosts — is opened untouched.
 
 ## Building a release locally
 

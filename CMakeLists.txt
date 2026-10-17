@@ -110,7 +110,7 @@ if(NOT CMAKE_PREFIX_PATH)
     endif()
 endif()
 
-find_package(Qt6 6.11 QUIET COMPONENTS Core Gui Widgets Svg Qml Quick QuickControls2 Quick3D ShaderTools Test)
+find_package(Qt6 6.11 QUIET COMPONENTS Core Gui Widgets Svg Network Qml Quick QuickControls2 Quick3D ShaderTools Test)
 if(NOT Qt6_FOUND)
     if(WIN32)
         message(FATAL_ERROR
@@ -132,7 +132,7 @@ if(NOT Qt6_FOUND)
             "have a CMakeUserPresets.json.")
     endif()
 endif()
-find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Widgets Svg Qml Quick QuickControls2 Quick3D ShaderTools Test)
+find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Widgets Svg Network Qml Quick QuickControls2 Quick3D ShaderTools Test)
 qt_standard_project_setup(REQUIRES 6.11)
 
 # --- auto-update ------------------------------------------------------------
@@ -273,6 +273,51 @@ if(HYPERBIN_ANALYTICS)
     endif()
 endif()
 
+# Satoshi, hypernuclear's brand face: the app's only typeface (the splash
+# and the welcome window). Its licence (the ITF Free Font License, from
+# Fontshare) lets an app embed it but not a repository redistribute it, and
+# forbids modifying it, so it is not committed: each build fetches its own
+# unmodified copy from Fontshare, the way the updaters below are fetched.
+# There is no fallback face, so a build that can't fetch it stops here.
+# The first configure needs the network; after that the copy in the build
+# tree is reused.
+set(_satoshi_dir "${CMAKE_BINARY_DIR}/_deps/satoshi")
+# The zip's layout is Fontshare's (Satoshi_Complete/Fonts/OTF/…): found by
+# name rather than by path, so a renamed top folder doesn't matter.
+file(GLOB_RECURSE _satoshi_black "${_satoshi_dir}/*.otf")
+list(FILTER _satoshi_black INCLUDE REGEX "/Satoshi-Black\\.otf$")
+if(NOT _satoshi_black)
+    # A few tries: one dropped connection shouldn't fail a CI build.
+    foreach(_attempt RANGE 1 3)
+        file(DOWNLOAD "https://api.fontshare.com/v2/fonts/download/satoshi"
+             "${_satoshi_dir}/satoshi.zip" STATUS _satoshi_status TIMEOUT 60)
+        list(GET _satoshi_status 0 _satoshi_code)
+        list(GET _satoshi_status 1 _satoshi_error)
+        if(_satoshi_code EQUAL 0)
+            break()
+        endif()
+        message(STATUS "hyperbin: Satoshi download attempt ${_attempt} failed (${_satoshi_error})")
+        execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep 5)
+    endforeach()
+    if(NOT _satoshi_code EQUAL 0)
+        message(FATAL_ERROR "hyperbin: could not download Satoshi from Fontshare "
+                            "(${_satoshi_error}). The app's typeface is fetched at "
+                            "configure time; check the network and configure again.")
+    endif()
+    file(ARCHIVE_EXTRACT INPUT "${_satoshi_dir}/satoshi.zip" DESTINATION "${_satoshi_dir}")
+    file(GLOB_RECURSE _satoshi_black "${_satoshi_dir}/*.otf")
+    list(FILTER _satoshi_black INCLUDE REGEX "/Satoshi-Black\\.otf$")
+    if(NOT _satoshi_black)
+        message(FATAL_ERROR "hyperbin: Fontshare's Satoshi zip has no Satoshi-Black.otf; "
+                            "its layout has changed (see ${_satoshi_dir})")
+    endif()
+endif()
+get_filename_component(HYPERBIN_SATOSHI_DIR "${_satoshi_black}" DIRECTORY)
+set(HYPERBIN_SATOSHI_FILES "")
+foreach(_weight Regular Medium Bold Black)
+    list(APPEND HYPERBIN_SATOSHI_FILES "${HYPERBIN_SATOSHI_DIR}/Satoshi-${_weight}.otf")
+endforeach()
+
 set(HYPERBIN_UPDATE_SOURCES src/update/AppUpdater.h)
 if(HYPERBIN_AUTO_UPDATE AND APPLE)
     include(FetchContent)
@@ -318,6 +363,9 @@ qt_add_executable(hyperbin
     src/app/Settings.h
     src/app/TrayMenu.cpp
     src/app/TrayMenu.h
+    src/app/WebsiteLinks.h
+    src/app/WelcomeBridge.cpp
+    src/app/WelcomeBridge.h
     src/core/FlySim.cpp
     src/core/FlySim.h
     src/core/PowerPolicy.cpp
@@ -387,6 +435,8 @@ qt_add_qml_module(hyperbin
         qml/TentacleVisual.qml
         qml/Permissions.qml
         qml/Splash.qml
+        qml/Welcome.qml
+        qml/PlatformMarks.qml
         qml/HyperbinLockup.qml
         qml/HyperbinWordmark.qml
         qml/HypernuclearWordmark.qml
@@ -408,7 +458,7 @@ if(HYPERBIN_AUTO_UPDATE)
         HYPERBIN_EDDSA_PUBKEY="${HYPERBIN_EDDSA_PUBKEY}")
 endif()
 if(HYPERBIN_ANALYTICS)
-    target_link_libraries(hyperbin PRIVATE countly Qt6::Network)
+    target_link_libraries(hyperbin PRIVATE countly)
     target_compile_definitions(hyperbin PRIVATE
         HYPERBIN_COUNTLY_APP_KEY="${HYPERBIN_COUNTLY_APP_KEY}"
         HYPERBIN_COUNTLY_SERVER="${HYPERBIN_COUNTLY_SERVER}")
@@ -424,9 +474,16 @@ target_include_directories(hyperbin PRIVATE
     src/analytics
 )
 target_link_libraries(hyperbin PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Network
     Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Quick3D
 )
+# Satoshi, fetched above: compiled into the binary, the embedding the
+# licence allows, never copied into the source tree. Registered with the
+# font database at startup (main.cpp), so QML just names "Satoshi".
+qt_add_resources(hyperbin "hyperbin_satoshi"
+    PREFIX "/fonts"
+    BASE "${HYPERBIN_SATOSHI_DIR}"
+    FILES ${HYPERBIN_SATOSHI_FILES})
 qt_add_resources(hyperbin "hyperbin_icons"
     PREFIX "/icons"
     BASE resources
@@ -434,12 +491,6 @@ qt_add_resources(hyperbin "hyperbin_icons"
         resources/hyperbin.svg
         resources/env.hdr
         resources/splash.jpg
-        # A static SemiBold instance cut from Inter's variable font and
-        # subset to Latin, by scripts/cut_inter.py. Bundled rather than
-        # asked for by name: this ships as a direct download, and a font
-        # that silently falls back to the system UI face on every machine
-        # but the one it was designed on is not a brand.
-        resources/Inter-SemiBold.ttf
         # The eyeballs in the goo. Converted from a glTF with balsam — see
         # "Bringing in a model" in docs/effects.md for the command and what
         # to keep. The source model's cornea is a second,

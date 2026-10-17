@@ -13,6 +13,8 @@ add_test(NAME Settings.densityWithoutASizeDrawsNothing
          COMMAND tst_settings density_withoutASizeDrawsNothing)
 add_test(NAME Settings.firstRunHappensOnceAndIsRemembered
          COMMAND tst_settings firstRun_happensOnceAndIsRemembered)
+add_test(NAME Settings.welcomeShowsOnceEvenAfterAnEarlierFirstRun
+         COMMAND tst_settings welcome_showsOnceEvenAfterAnEarlierFirstRun)
 add_test(NAME Settings.persistenceSurvivesBeingKilled
          COMMAND tst_settings persistence_survivesBeingKilled)
 

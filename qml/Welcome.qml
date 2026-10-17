@@ -223,36 +223,63 @@ ApplicationWindow {
         color: win.inkMuted
     }
 
-    /// The filled button: the brand's green with its ink, or any colour
-    /// pair a product band hands it.
+    /// The filled button: a flat face in the brand's colour with its ink, on
+    /// fire. The fire burns beneath the face and comes off its top edge, with
+    /// sparks and a glow round it (shaders/buttonfire.frag): low at rest, up
+    /// on hover. Whatever sits above the button in its layout should be
+    /// stacked over it (z), so the flames rise behind the words.
     component FillButton: AbstractButton {
         id: fb
         property color fill: win.brandGreen
         property color label: win.brandInk
+        /// 0 at rest, 1 hovered: eased, so the fire rises rather than snaps.
+        property real heat: hovered && enabled ? 1 : 0
+        Behavior on heat { NumberAnimation { duration: 420; easing.type: Easing.OutCubic } }
+        /// The fire's and the border's clock, in seconds. Only runs while the
+        /// window is up: nothing burns off screen. Wraps every ten minutes,
+        /// before float time loses its fine steps.
+        property real clock: 0
+        NumberAnimation on clock {
+            from: 0
+            to: 600
+            duration: 600 * 1000
+            loops: Animation.Infinite
+            running: win.visible
+        }
         implicitHeight: 38
         implicitWidth: fbText.implicitWidth + 32
         hoverEnabled: true
         opacity: enabled ? 1 : 0.45
         HoverHandler { cursorShape: Qt.PointingHandCursor }
-        background: Rectangle {
-            radius: 9
-            color: fb.down ? Qt.darker(fb.fill, 1.12) : fb.hovered ? Qt.lighter(fb.fill, 1.06) : fb.fill
-            Behavior on color { ColorAnimation { duration: 120 } }
-            // A lit top edge: the face reads as a key, not a flat chip.
-            Rectangle {
-                anchors.fill: parent
-                radius: parent.radius
-                gradient: Gradient {
-                    GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, fb.down ? 0.0 : 0.22) }
-                    GradientStop { position: 0.5; color: Qt.rgba(1, 1, 1, 0.0) }
-                }
+        background: Item {
+            ShaderEffect {
+                // Room for the fire: the flames and sparks above, the glow
+                // round the other sides. All in button heights.
+                readonly property real side: parent.height * 1.0
+                readonly property real above: parent.height * 2.4
+                readonly property real below: parent.height * 1.0
+                property real time: fb.clock
+                property real heat: fb.heat
+                property real radius: 9
+                property size size: Qt.size(width, height)
+                property rect face: Qt.rect(side, above, parent.width, parent.height)
+                property color color: fb.fill
+                x: -side
+                y: -above
+                width: parent.width + 2 * side
+                height: above + parent.height + below
+                fragmentShader: "qrc:/shaders/buttonfire.frag.qsb"
             }
-            Rectangle {
+            // The face, with its fresnel border and the light going round it.
+            ShaderEffect {
                 anchors.fill: parent
-                radius: parent.radius
-                color: "transparent"
-                border.width: 1
-                border.color: Qt.rgba(0, 0, 0, 0.18)
+                property real time: fb.clock
+                property real heat: fb.heat
+                property real press: fb.down ? 1 : 0
+                property real radius: 9
+                property size size: Qt.size(width, height)
+                property color color: fb.fill
+                fragmentShader: "qrc:/shaders/buttonface.frag.qsb"
             }
         }
         contentItem: Text {
@@ -623,6 +650,16 @@ ApplicationWindow {
             height: 164
             clip: true
 
+            // On macOS the header IS the title bar (the art runs under it),
+            // and a title bar that is the window's own content doesn't move
+            // the window by itself. So a drag anywhere on the header hands
+            // the move to the system, as a title bar would; the traffic
+            // lights are the system's and sit above this.
+            DragHandler {
+                target: null
+                onActiveChanged: if (active) win.startSystemMove()
+            }
+
             Image {
                 anchors.fill: parent
                 source: win.assets + "splash.jpg"
@@ -767,10 +804,15 @@ ApplicationWindow {
                         Layout.topMargin: 14
                         visible: win.signupState !== "sent"
                         spacing: 8
+                        // Under the words above it, so the Subscribe button's
+                        // flames rise behind them rather than over them.
+                        z: -1
 
                         TextField {
                             id: emailField
                             Layout.fillWidth: true
+                            // Over the button's fire, whose glow reaches it.
+                            z: 1
                             implicitHeight: 38
                             leftPadding: 12
                             rightPadding: 12

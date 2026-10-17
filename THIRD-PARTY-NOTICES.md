@@ -44,6 +44,7 @@ even though this source is MIT.
 | [WinSparkle](https://winsparkle.org) | MIT | fetched at configure time (Windows updater) |
 | [Countly C++ SDK](https://github.com/Countly/countly-sdk-cpp) | MIT | git submodule under `third_party/`; optional, `-DHYPERBIN_ANALYTICS=OFF` removes it |
 | Satoshi | ITF Free Font License | fetched at configure time, compiled in; never committed (below) |
+| [Ashima Arts' webgl-noise](https://github.com/ashima/webgl-noise) (3D simplex noise) | MIT, © 2011 Ashima Arts | copied into `shaders/buttonfire.frag`, with its notice; the welcome window's button fire |
 
 ### Platform marks
 

@@ -423,6 +423,9 @@ qt_add_shaders(hyperbin "hyperbin_shaders"
     FILES
         shaders/flymask.vert
         shaders/flymask.frag
+        # The welcome window's fire button (qml/Welcome.qml, FillButton).
+        shaders/buttonfire.frag
+        shaders/buttonface.frag
 )
 qt_add_qml_module(hyperbin
     URI hyperbin

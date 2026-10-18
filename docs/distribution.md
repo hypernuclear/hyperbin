@@ -25,8 +25,13 @@ update would ever be offered. Both jobs set `fetch-depth: 0`.
 
 ## Releasing
 
-1. Bump `project(hyperbin VERSION ...)` and land it on `main`.
-2. Tag it: `git tag v0.2.0 && git push origin v0.2.0`.
+1. Bump `project(hyperbin VERSION x.y.z)` on a `release/vx.y.z` branch, with a
+   `## [x.y.z]` CHANGELOG entry, and open a pull request into `main`.
+2. Merge it. `tag-on-merge.yml` tags the merge commit `vx.y.z`, which starts
+   the release. It checks that the branch name, the CMake version and the
+   CHANGELOG agree first, and needs the `RELEASE_TAG_PAT` secret (a token with
+   contents: write on this repo; `GITHUB_TOKEN` cannot start another
+   workflow). If it fails, tag by hand: `git tag vx.y.z && git push origin vx.y.z`.
 3. Watch the run. On success R2 holds:
 
 ```

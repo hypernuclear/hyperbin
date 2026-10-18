@@ -15,6 +15,11 @@ release promotes that section to the new version and dates it.
 ### Changed
 
 ### Fixed
+- **On macOS 27 with the Dock on the left or right, the effects land on the
+  Trash again** instead of beside it. macOS 27 centres a side Dock's icons in
+  their hit areas, where 26 sat them toward the screen edge, and hyperbin was
+  still applying 26's offset: everything drew about 5pt toward the edge and 3pt
+  low. A bottom Dock was unaffected.
 
 ## [1.1.0] - 2026-08-19
 

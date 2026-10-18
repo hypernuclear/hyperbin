@@ -110,6 +110,21 @@ QRect visualIconRect(const QRect &ax)
     double sizeK  = 0.957; // tile side / min(AX.w, AX.h)
     double nearPt = 5.0;   // residual toward the Dock's edge, in pt
     double crossPt = 3.0;  // residual along the Dock, in pt
+    // macOS 27 centres a side Dock's icons in their hit areas (HYP-301).
+    // Measured 2026-10-18 on 27.0.1, Dock on the left: the Zoom tile was
+    // 34pt square centred on (-1887, 825), exactly the centre of its 56x44
+    // AX rect, and the Trash and its neighbours lined up the same way. So
+    // the two residuals above, which were right on 26, pushed everything
+    // 5pt toward the screen edge and 3pt down -- the goo drawn beside the
+    // bin instead of on it. sizeK still holds: the tile is the usual ~80% of
+    // its artwork, and 34 / 0.8 is 0.96 of 44. A bottom Dock on 27 still
+    // lines up with the 26 residuals, so it keeps them.
+    static const bool centredSideDock = [NSProcessInfo.processInfo
+        isOperatingSystemAtLeastVersion:NSOperatingSystemVersion{27, 0, 0}];
+    if (centredSideDock && ax.width() >= ax.height()) {
+        nearPt = 0.0;
+        crossPt = 0.0;
+    }
     // The artwork is not quite centred in the AX tile: it sits a couple of
     // points right of centre, so the mask's left edge lands inside the
     // bin while the right edge is exact. This is applied to the left edge

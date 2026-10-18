@@ -15,6 +15,29 @@ release promotes that section to the new version and dates it.
 ### Changed
 
 ### Fixed
+
+## [1.2.0] - 2026-10-18
+
+### Added
+
+- **A welcome window.** It says what hyperbin does, takes an email for the
+  hypernuclear newsletter if you want it, and shows the studio's other apps,
+  with switches for Open at Login and usage data. It opens when the app
+  starts until you untick *Show at startup*, and *Welcome to hyperbin…* in
+  the menu brings it back. Updating from 1.1.0 shows it once on the next
+  launch.
+- **Show Welcome at Startup** in the menu, the same switch as the window's.
+
+### Changed
+
+- **The menu is grouped:** status, then the animation and its settings, then
+  the app's own items, then the switches, then Quit.
+- **The interface typeface is Satoshi.** Its licence does not allow it in the
+  repository, so CMake downloads it from Fontshare at build time and the
+  build fails if it cannot. Inter is gone.
+
+### Fixed
+
 - **On macOS 27 with the Dock on the left or right, the effects land on the
   Trash again** instead of beside it. macOS 27 centres a side Dock's icons in
   their hit areas, where 26 sat them toward the screen edge, and hyperbin was

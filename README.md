@@ -1,20 +1,41 @@
 # hyperbin
 
-Animated effects over your Trash / Recycle Bin, growing as it fills up.
-Free giveaway app for macOS and Windows. Direct download only.
+Your Trash, haunted. hyperbin draws an animated effect over the macOS
+Trash or the Windows Recycle Bin, and the effect grows as the bin fills
+up: a gentle (overt?) reminder to empty it. Empty the bin and the effect
+retreats.
 
-Cross-platform Qt 6.11 + C++. Two effects ship today — **Flies** and
-**Ooze** — picked from the menu-bar item.
+![Flies, Ooze and Tentacles on the Windows Recycle Bin and the macOS Trash](docs/media/hyperbin.webp)
+
+<sub>The three effects from the live demo on
+[hypernuclear.com/hyperbin](https://hypernuclear.com/hyperbin?ref=github),
+which runs ports of the app's own simulations and shaders in WebGL.</sub>
+
+- **Flies** land on the bin, walk about, and scatter from your pointer.
+- **Ooze** fills the bin and runs down the outside. It has eyes, and
+  they follow your cursor.
+- **Tentacles** reach out of the bin, slap the rim, coil, and thrash
+  back under the rubbish when you empty it.
+
+Free and MIT-licensed, for macOS and Windows. Notarized on macOS, signed
+on Windows. No account, no store, no pro tier. Pick the effect, how much
+of it, and how full the bin has to be from the menu-bar or tray item.
+Made by [hypernuclear](https://hypernuclear.com/?ref=github).
 
 ## Download & docs
 
-Grab the newest build from [hypernuclear.com/docs/hyperbin](https://hypernuclear.com/docs/hyperbin) —
-the docs page links every flavor (Apple Silicon / Intel, installer / MSIX)
-and covers install and permissions. (Direct links: [Apple
-Silicon](https://hypernuclear.com/hyperbin/download/mac) /
-[Intel](https://hypernuclear.com/hyperbin/download/mac/x64) /
-[Windows](https://hypernuclear.com/hyperbin/download/windows) /
-[MSIX](https://hypernuclear.com/hyperbin/download/windows/msix).)
+| Platform | Download |
+| -- | -- |
+| macOS, Apple Silicon | [hyperbin for Apple Silicon](https://hypernuclear.com/hyperbin/download/mac) |
+| macOS, Intel | [hyperbin for Intel](https://hypernuclear.com/hyperbin/download/mac/x64) |
+| Windows | [Installer](https://hypernuclear.com/hyperbin/download/windows) or [MSIX](https://hypernuclear.com/hyperbin/download/windows/msix) |
+
+[hypernuclear.com/docs/hyperbin](https://hypernuclear.com/docs/hyperbin?ref=github)
+covers install, the two macOS permissions it asks for and why, settings,
+and troubleshooting.
+
+Cross-platform Qt 6.11 + C++. The rest of this README is for building and
+hacking on it.
 
 ## Status
 
@@ -40,8 +61,8 @@ budget.
 
 ## The effects
 
-Both are driven by the same host (`EffectItem`) and the same three-state
-power model, and neither knows anything about the other.
+All three are driven by the same host (`EffectItem`) and the same
+three-state power model, and none knows anything about the others.
 
 **Flies** — a steering-behaviour swarm. Wander, separation and
 containment produce the motion; nothing is keyframed. They land on the
@@ -56,9 +77,19 @@ Qt Quick 3D, because the look wanted is transmission: the bin seen
 The body is a solid of revolution swept from the bin's own measured
 silhouette, and everything that moves — the drifting lumps, the wave
 travelling down it, the puddle gathering at the foot — happens in the
-vertex shader, so the mesh is rebuilt only when the level changes.
+vertex shader, so the mesh is rebuilt only when the level changes. Its
+eyes open, blink and glance around, seated on the gel's own surface, and
+converge on the pointer when it's over the bin.
 
-Adding a third means one entry in `EffectRegistry` and a class
+**Tentacles** — arms seated as a triangle in the bin's measured opening.
+Each is a joint chain solved by FABRIK (`core/TentacleChain`) with a
+travelling wave laid over it, so an arm has a shape rather than an
+angle. They're masked against the opening itself: a fragment is thrown
+away where it falls behind the near lip or the rubbish, so an arm passes
+behind the lid instead of floating over the icon
+(`shaders/tentacle.frag`).
+
+Adding another means one entry in `EffectRegistry` and a class
 implementing `Effect`. `docs/effects.md` is the contract, including the
 three Qt colour-pipeline rules that will otherwise cost you an afternoon.
 

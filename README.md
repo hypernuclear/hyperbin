@@ -1,9 +1,8 @@
 # hyperbin
 
-Your Trash, haunted. hyperbin draws an animated effect over the macOS
-Trash or the Windows Recycle Bin, and the effect grows as the bin fills
-up: a gentle (overt?) reminder to empty it. Empty the bin and the effect
-retreats.
+Your Trash, but haunted. hyperbin draws an animated effect over the macOS
+Trash or the Windows Recycle Bin, and the effect intensifies as the bin fills. It's a "gentle" reminder to empty it. 😉 Empty the bin and the effect
+disappears.
 
 ![Flies, Ooze and Tentacles on the Windows Recycle Bin and the macOS Trash](docs/media/hyperbin.webp)
 

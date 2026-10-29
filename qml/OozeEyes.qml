@@ -3,16 +3,15 @@ import QtQuick3D
 
 // Eyeballs set into the gel.
 //
-// They do not travel. Where each one sits, how big it is and which way
-// the gel faces under it all come from OozeEffect, which owns the body's
-// profile — see its eyeSpheres/eyeNormals. What is left here is the part
-// that needs the CAMERA, which the scene owns and the effect does not:
-// aiming them.
+// They do not travel. Where each one sits, how big it is, where it looks,
+// its saccades and its blinks all come from OozeEffect, one OozeEye per
+// slot: it owns the body's profile and is told the camera's tilt. What is
+// left here is drawing them, and every binding is a plain read of a value
+// that signals only when it moved.
 //
-// The pupils flick between fixations the way real eyes do: a saccade is
-// close to instantaneous, so these snap rather than glide. Easing them
-// would look like something searching; snapping looks like something
-// watching.
+// Working the aim out here, in JavaScript, was the earlier arrangement:
+// fourteen delegates re-running vector maths every frame was most of the
+// effect's CPU on a real Dock (OozeEye says more).
 Node {
     id: eyes
 
@@ -33,41 +32,7 @@ Node {
     required property real gooAbsorption
     required property real gooScatter
 
-    /// How far the gel's own surface pulls a gaze off the camera.
-    ///
-    /// At 0 every eye stares down the lens wherever it sits, which is
-    /// what this looked like first and why the ones out near the
-    /// silhouette read as decals: an eye buried in something has an
-    /// orbit, and an orbit points where the surface points. At 1 they
-    /// would face straight out of the body and the ones on the sides
-    /// would be looking away entirely.
-    ///
-    /// It costs the eyes on the front almost nothing whatever it is set
-    /// to — the normal there is already very nearly the camera — so this
-    /// is really a setting for the flanks alone. At a third, one out on
-    /// the side turned by only about thirty degrees, which still read as
-    /// an eye pasted on the silhouette staring past its own socket. Over
-    /// half turns it about fifty, which is a ball sitting in the goo and
-    /// looking out of it, and it keeps watching you everywhere it can
-    /// plausibly be said to be facing you at all.
-    property real gazeBias: 0.55
-
-    readonly property var spheres: effect ? effect.eyeSpheres : []
-    readonly property var normals: effect ? effect.eyeNormals : []
     readonly property real time: effect ? effect.time : 0
-
-    /// The pointer, in the scene, and how much the eyes care about it.
-    /// Both computed in C++ — see OozeEffect::updateGaze, which also
-    /// explains why a POINT and not a direction.
-    readonly property vector3d gazeTarget:
-        effect ? effect.gazeTarget : Qt.vector3d(0, 0, 0)
-    readonly property real gazePull: effect ? effect.gazePull : 0
-
-    /// Toward the camera. It is orthographic, so this is the same
-    /// direction everywhere in the scene and there is no per-eye look-at
-    /// to compute — only the lean away from it that the gel asks for.
-    readonly property vector3d camDir: Qt.vector3d(
-        0, Math.sin(camTilt * Math.PI / 180), Math.cos(camTilt * Math.PI / 180))
 
     /// The camera's own up, in the scene. The lids close along it, so
     /// they sweep the face of each ball that is actually visible rather
@@ -75,14 +40,6 @@ Node {
     /// body's wall. It is camDir turned a quarter turn about x.
     readonly property vector3d camUp: Qt.vector3d(
         0, Math.cos(camTilt * Math.PI / 180), -Math.sin(camTilt * Math.PI / 180))
-
-    // A stable per-eye value in [0,1). Same index, same number, every
-    // frame — so an eye keeps its saccade instead of being re-rolled
-    // whenever anything re-evaluates.
-    function rnd(a, b) {
-        const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
-        return s - Math.floor(s);
-    }
 
     Repeater3D {
         // CONSTANT, and the list's length only decides how many are
@@ -95,110 +52,22 @@ Node {
         delegate: Node {
             id: eye
             required property int index
+            readonly property OozeEye d: eyes.effect ? eyes.effect.eye(index) : null
 
-            readonly property bool out: index < eyes.spheres.length
-            readonly property var sphere: out ? eyes.spheres[index] : null
-            readonly property var normal: out ? eyes.normals[index] : null
-            readonly property real size: sphere ? sphere.w : 1
-            /// 1 wide open, 0 shut. Rides in the normal's spare slot.
-            readonly property real open: normal ? normal.w : 1
-            /// How far this eye's lid axis is canted off the horizontal,
-            /// in radians. Constant per eye — it is anatomy, not motion —
-            /// so it is hashed here rather than sent every frame.
-            readonly property real lidRoll: (eyes.rnd(index, 37) - 0.5) * 0.9
+            visible: d ? d.out : false
+            position: d ? d.position : Qt.vector3d(0, 0, 0)
 
-            visible: out
-            position: sphere ? Qt.vector3d(sphere.x, sphere.y, sphere.z)
-                             : Qt.vector3d(0, 0, 0)
-
-            // --- the gaze frame -----------------------------------------
-            //
-            // What this eye would look at with no pointer about: the lens.
-            // The camera is orthographic, so that is the same direction for
-            // every eye in the scene.
-            //
-            // ...and what it looks at when there is one: the pointer, which
-            // is a POSITION, so each eye gets its own direction and the
-            // cluster converges. That difference is the whole effect —
-            // parallel gazes read as the gel tilting, converging ones as
-            // being looked at.
-            readonly property vector3d toPointer: {
-                const d = eyes.gazeTarget.minus(eye.position)
-                return d.length() > 0.001 ? d.normalized() : eyes.camDir
-            }
-            readonly property vector3d aim:
-                eyes.camDir.times(1 - eyes.gazePull)
-                    .plus(toPointer.times(eyes.gazePull))
-                    .normalized()
-
-            // Somewhere between what it is looking at and the way the gel
-            // faces here. The lean toward the normal is what keeps an eye
-            // out on the flank from staring through its own socket, and it
-            // does that job for the pointer exactly as it did for the lens
-            // — which is why following the pointer needed no clamp of its
-            // own. The pull is capped below 1 for the same reason it is on
-            // the tentacles: leaving a little of the resting pose in stops
-            // fourteen eyes locking into one dead-straight stare.
-            //
-            // The lean is EASED OFF while tracking. At rest it is doing
-            // the work described above — keeping a flank eye from staring
-            // through its own socket at a camera it cannot face. Under a
-            // pointer it is fighting the one thing the eyes are trying to
-            // say: measured at the full 0.55, a pointer swung from one side
-            // of the bin to the other moved the irises by under a quarter
-            // of an eye's radius, which is present in the numbers and
-            // invisible on screen. Halved while tracking, the same swing
-            // reads. It is not taken to zero — the socket is still there,
-            // and an eye out on the side that ignored it would look like a
-            // sticker.
-            readonly property real bias:
-                eyes.gazeBias * (1 - 0.5 * eyes.gazePull)
-            readonly property vector3d gaze: normal
-                ? aim.times(1 - bias)
-                      .plus(Qt.vector3d(normal.x, normal.y, normal.z)
-                                .times(bias))
-                      .normalized()
-                : aim
-
-            // Yaw then pitch, as two nested nodes rather than one node's
-            // eulerRotation. Which order Qt composes a pair of Euler
-            // angles in is a thing to look up and get wrong; nesting says
-            // it outright, and the pair is exactly the decomposition of a
-            // direction into (turn, then lift):
-            //
-            //   Ry(yaw) * Rx(pitch) * +z  =  (sin y cos p, -sin p, cos y cos p)
+            // Where it looks, as yaw then pitch on two nested nodes.
             Node {
-                eulerRotation.y: Math.atan2(eye.gaze.x, eye.gaze.z) * 180 / Math.PI
+                eulerRotation.y: eye.d ? eye.d.yaw : 0
 
                 Node {
-                    eulerRotation.x: -Math.asin(Math.max(-1, Math.min(1, eye.gaze.y)))
-                                     * 180 / Math.PI
+                    eulerRotation.x: eye.d ? eye.d.pitch : 0
 
+                    // The saccade on top.
                     Node {
-                        // The saccade. Floor(time) picks a fixation, and
-                        // the fixation is hashed into an offset, so the
-                        // eye holds still and then jumps — no
-                        // interpolation anywhere.
-                        readonly property int fix:
-                            Math.floor(eyes.time * 1.6 + eye.index * 3.7)
-                        readonly property bool blank: eyes.rnd(fix, eye.index) > 0.72
-
-                        // A fixation that lands on the camera, roughly one
-                        // in four, is what sells the rest: an eye that is
-                        // always darting never appears to have noticed
-                        // you.
-                        // Damped down while the pointer has their
-                        // attention. A saccade is what an eye does when it
-                        // has nothing to look at; kept at full size on top
-                        // of tracking, the eye jitters around the thing it
-                        // is supposed to be locked on and reads as
-                        // struggling to focus. Not removed altogether — a
-                        // completely still eye is a dead one, and the
-                        // remainder is small enough to pass for the
-                        // micro-movement a real one never stops making.
-                        readonly property real dart: 1 - eyes.gazePull * 0.85
-                        eulerRotation.x: (blank ? 0 : (eyes.rnd(fix, eye.index + 11) - 0.5) * 26) * dart
-                        eulerRotation.y: (blank ? 0 : (eyes.rnd(fix, eye.index + 23) - 0.5) * 34) * dart
+                        eulerRotation.x: eye.d ? eye.d.dartX : 0
+                        eulerRotation.y: eye.d ? eye.d.dartY : 0
 
                         Model {
                             source: "qrc:/icons/meshes/eye.mesh"
@@ -207,28 +76,28 @@ Node {
                             // the mesh from six directions rather than
                             // read off the asset.
                             eulerRotation.y: 180
-                            scale: Qt.vector3d(eye.size, eye.size, eye.size)
+                            scale: eye.d ? Qt.vector3d(eye.d.size, eye.d.size, eye.d.size)
+                                         : Qt.vector3d(1, 1, 1)
 
                             // One material per eye, and it has to be:
-                            // `openness` is a uniform, and nine eyes
-                            // blinking on nine different clocks need nine
-                            // values of it. They share one shader and one
-                            // pipeline — this is nine uniform buffers,
-                            // not nine programs — and the maps are
-                            // declared once above and merely referenced,
-                            // so it is also one copy of each texture.
+                            // `openness` is a uniform, and eyes blinking on
+                            // their own clocks need their own values of it.
+                            // They share one shader and one pipeline, this
+                            // is one uniform buffer each, not one program,
+                            // and the maps are declared once below and
+                            // merely referenced.
                             materials: CustomMaterial {
                                 shadingMode: CustomMaterial.Shaded
                                 cullMode: CustomMaterial.BackFaceCulling
-                                property real openness: eye.open
+                                property real openness: eye.d ? eye.d.open : 1
                                 property real gooTime: eyes.time
                                 property vector3d camUp: eyes.camUp
-                                property vector3d gazeW: eye.gaze
-                                property real lidRoll: eye.lidRoll
+                                property vector3d gazeW: eye.d ? eye.d.gaze : Qt.vector3d(0, 0, 1)
+                                property real lidRoll: eye.d ? eye.d.lidRoll : 0
                                 // Keeps the ragged rim of one eye's lid
                                 // from being the same rag as its
                                 // neighbour's.
-                                property real gooSeed: eye.index * 7.31
+                                property real gooSeed: eye.d ? eye.d.seed : 0
                                 property color gooTint: eyes.gooTint
                                 property real gooAbsorption: eyes.gooAbsorption
                                 property real gooScatter: eyes.gooScatter

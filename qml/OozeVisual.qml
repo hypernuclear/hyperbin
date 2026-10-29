@@ -28,13 +28,9 @@ Item {
     readonly property real binW: effect ? effect.binSize.width : 40
     readonly property real binH: effect ? effect.binSize.height : 40
 
-    // Where the eyes are, so the gel can climb them. (x, y, z, radius),
-    // and only the ones currently out are in the list — see
-    // OozeEffect::eyeSpheres.
-    readonly property var eyeList: effect ? effect.eyeSpheres : []
-    function eyeSphere(i) {
-        return i < eyeList.length ? eyeList[i] : Qt.vector4d(0, 0, 0, 0)
-    }
+    // Where the eyes are, so the gel can climb them: (x, y, z, radius), all
+    // zero for a slot with no eye in it — see OozeEye::sphere.
+    function eyeAt(i) { return effect ? effect.eye(i) : null }
 
     View3D {
         anchors.fill: parent
@@ -186,20 +182,34 @@ Item {
         // array. A slot nobody is using has a radius of zero, which the
         // shaders read as "not there" — so the list is as long as
         // OozeEffect::kMaxEyes and usually only part full.
-        property vector4d eye0: root.eyeSphere(0)
-        property vector4d eye1: root.eyeSphere(1)
-        property vector4d eye2: root.eyeSphere(2)
-        property vector4d eye3: root.eyeSphere(3)
-        property vector4d eye4: root.eyeSphere(4)
-        property vector4d eye5: root.eyeSphere(5)
-        property vector4d eye6: root.eyeSphere(6)
-        property vector4d eye7: root.eyeSphere(7)
-        property vector4d eye8: root.eyeSphere(8)
-        property vector4d eye9: root.eyeSphere(9)
-        property vector4d eye10: root.eyeSphere(10)
-        property vector4d eye11: root.eyeSphere(11)
-        property vector4d eye12: root.eyeSphere(12)
-        property vector4d eye13: root.eyeSphere(13)
+        readonly property OozeEye e0: root.eyeAt(0)
+        property vector4d eye0: e0 ? e0.sphere : Qt.vector4d(0, 0, 0, 0)
+        readonly property OozeEye e1: root.eyeAt(1)
+        property vector4d eye1: e1 ? e1.sphere : Qt.vector4d(0, 0, 0, 0)
+        readonly property OozeEye e2: root.eyeAt(2)
+        property vector4d eye2: e2 ? e2.sphere : Qt.vector4d(0, 0, 0, 0)
+        readonly property OozeEye e3: root.eyeAt(3)
+        property vector4d eye3: e3 ? e3.sphere : Qt.vector4d(0, 0, 0, 0)
+        readonly property OozeEye e4: root.eyeAt(4)
+        property vector4d eye4: e4 ? e4.sphere : Qt.vector4d(0, 0, 0, 0)
+        readonly property OozeEye e5: root.eyeAt(5)
+        property vector4d eye5: e5 ? e5.sphere : Qt.vector4d(0, 0, 0, 0)
+        readonly property OozeEye e6: root.eyeAt(6)
+        property vector4d eye6: e6 ? e6.sphere : Qt.vector4d(0, 0, 0, 0)
+        readonly property OozeEye e7: root.eyeAt(7)
+        property vector4d eye7: e7 ? e7.sphere : Qt.vector4d(0, 0, 0, 0)
+        readonly property OozeEye e8: root.eyeAt(8)
+        property vector4d eye8: e8 ? e8.sphere : Qt.vector4d(0, 0, 0, 0)
+        readonly property OozeEye e9: root.eyeAt(9)
+        property vector4d eye9: e9 ? e9.sphere : Qt.vector4d(0, 0, 0, 0)
+        readonly property OozeEye e10: root.eyeAt(10)
+        property vector4d eye10: e10 ? e10.sphere : Qt.vector4d(0, 0, 0, 0)
+        readonly property OozeEye e11: root.eyeAt(11)
+        property vector4d eye11: e11 ? e11.sphere : Qt.vector4d(0, 0, 0, 0)
+        readonly property OozeEye e12: root.eyeAt(12)
+        property vector4d eye12: e12 ? e12.sphere : Qt.vector4d(0, 0, 0, 0)
+        readonly property OozeEye e13: root.eyeAt(13)
+        property vector4d eye13: e13 ? e13.sphere : Qt.vector4d(0, 0, 0, 0)
 
         vertexShader: "qrc:/shaders3d/ooze3d.vert"
         fragmentShader: "qrc:/shaders3d/ooze3d.frag"

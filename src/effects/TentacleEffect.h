@@ -31,9 +31,12 @@ class SpineTexture;
 class TentacleEffect : public Effect
 {
     Q_OBJECT
-    Q_PROPERTY(float time READ time NOTIFY frameChanged)
-    Q_PROPERTY(float level READ level NOTIFY frameChanged)
-    Q_PROPERTY(int count READ count NOTIFY frameChanged)
+    /// Each on its own signal, and level and count only when they move.
+    /// One frameChanged for all three re-ran every arm's `index < count`
+    /// binding on every frame for a number that changes a few times a fill.
+    Q_PROPERTY(float time READ time NOTIFY timeChanged)
+    Q_PROPERTY(float level READ level NOTIFY levelChanged)
+    Q_PROPERTY(int count READ count NOTIFY countChanged)
     /// How many the scene should build. CONSTANT, and it matters that it
     /// is: the scene builds this many once and hides the ones that are
     /// not out. Driving a Repeater3D from `count` instead rebuilds every
@@ -189,10 +192,14 @@ public:
     bool mouthMeasured() const { return m_mouth.measured; }
 
 signals:
-    void frameChanged();
+    void timeChanged();
+    void levelChanged();
+    void countChanged();
     void shapeChanged();
 
 private:
+    float m_lastLevel = -1.0f;
+    int m_lastCount = -1;
     /// The most that can ever be out — one draw call each.
     static constexpr int kMaxTentacles = 3;
 

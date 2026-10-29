@@ -144,7 +144,15 @@ void TentacleEffect::step(float dt)
 
     m_dt = dt;
     updateArms();
-    emit frameChanged();
+    emit timeChanged();
+    if (m_level != m_lastLevel) {
+        m_lastLevel = m_level;
+        emit levelChanged();
+    }
+    if (const int n = count(); n != m_lastCount) {
+        m_lastCount = n;
+        emit countChanged();
+    }
 
     const bool empty = isEmpty();
     if (empty != m_wasEmpty) {

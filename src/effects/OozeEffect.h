@@ -12,22 +12,104 @@
 
 #include <QImage>
 #include <QSizeF>
-#include <QVariantList>
 #include <QVector>
 #include <QVector3D>
 #include <QVector4D>
+#include <QtQml/qqmlregistration.h>
 
 namespace hyperbin {
 
 class IconTexture;
+
+/// One eye, everything qml/OozeEyes.qml needs to draw it, worked out here.
+///
+/// Per eye and per property, each with its own signal, and a signal only
+/// when the value moved. This used to be two QVariantLists on the effect
+/// behind one per-frame signal, and the scene derived the rest in
+/// JavaScript: every frame both lists became fresh JS arrays, and all
+/// fourteen delegates re-ran their aim, lean, saccade and Euler maths in
+/// bindings. Sampled on a real Dock (Oct 29) that was most of the effect's
+/// CPU at the display's refresh rate. Now the maths is C++, and a
+/// delegate's bindings are plain reads.
+class OozeEye : public QObject
+{
+    Q_OBJECT
+    QML_ELEMENT
+    QML_UNCREATABLE("Made by OozeEffect")
+    /// Whether this slot has an eye in it at all.
+    Q_PROPERTY(bool out READ out NOTIFY outChanged)
+    /// The ball's centre, bin-local scene units, and its radius.
+    Q_PROPERTY(QVector3D position READ position NOTIFY positionChanged)
+    Q_PROPERTY(float size READ size NOTIFY sizeChanged)
+    /// (x, y, z, radius), all zero when not out: the gel's shaders read it
+    /// to swell round the ball. The same numbers as position and size.
+    Q_PROPERTY(QVector4D sphere READ sphere NOTIFY sphereChanged)
+    /// Where it looks, a unit vector, and the same as two angles in
+    /// degrees: yaw (about y) then pitch (about x), nested in the scene.
+    Q_PROPERTY(QVector3D gaze READ gaze NOTIFY gazeChanged)
+    Q_PROPERTY(float yaw READ yaw NOTIFY gazeChanged)
+    Q_PROPERTY(float pitch READ pitch NOTIFY gazeChanged)
+    /// The saccade on top of the gaze, degrees about x and y.
+    Q_PROPERTY(float dartX READ dartX NOTIFY dartChanged)
+    Q_PROPERTY(float dartY READ dartY NOTIFY dartChanged)
+    /// 1 wide open, 0 shut.
+    Q_PROPERTY(float open READ open NOTIFY openChanged)
+    /// Anatomy, not motion: how far its lid axis is canted, in radians,
+    /// and the seed that keeps its lid's ragged rim its own.
+    Q_PROPERTY(float lidRoll READ lidRoll CONSTANT)
+    Q_PROPERTY(float seed READ seed CONSTANT)
+
+public:
+    OozeEye(int index, QObject *parent);
+
+    bool out() const { return m_out; }
+    QVector3D position() const { return m_position; }
+    float size() const { return m_size; }
+    QVector4D sphere() const { return m_out ? QVector4D(m_position, m_size) : QVector4D(); }
+    QVector3D gaze() const { return m_gaze; }
+    float yaw() const { return m_yaw; }
+    float pitch() const { return m_pitch; }
+    float dartX() const { return m_dartX; }
+    float dartY() const { return m_dartY; }
+    float open() const { return m_open; }
+    float lidRoll() const { return m_lidRoll; }
+    float seed() const { return m_seed; }
+
+    /// The slot is empty this frame. Only `out` and `sphere` move.
+    void hide();
+    /// Out, at this place and size, looking along `gaze`, darted by
+    /// (dartX, dartY) degrees, this open. Signals only what changed.
+    void show(const QVector3D &position, float size, const QVector3D &gaze,
+              float dartX, float dartY, float open);
+
+signals:
+    void outChanged();
+    void positionChanged();
+    void sizeChanged();
+    void sphereChanged();
+    void gazeChanged();
+    void dartChanged();
+    void openChanged();
+
+private:
+    bool m_out = false;
+    QVector3D m_position;
+    float m_size = 1.0f;
+    QVector3D m_gaze {0.0f, 0.0f, 1.0f};
+    float m_yaw = 0.0f, m_pitch = 0.0f;
+    float m_dartX = 0.0f, m_dartY = 0.0f;
+    float m_open = 1.0f;
+    float m_lidRoll = 0.0f;
+    float m_seed = 0.0f;
+};
 
 class OozeEffect : public Effect
 {
     Q_OBJECT
     /// Bound by qml/OozeVisual.qml. Everything the scene needs and
     /// nothing it can work out for itself.
-    Q_PROPERTY(float level READ level NOTIFY frameChanged)
-    Q_PROPERTY(float time READ time NOTIFY frameChanged)
+    Q_PROPERTY(float level READ level NOTIFY levelChanged)
+    Q_PROPERTY(float time READ time NOTIFY timeChanged)
     Q_PROPERTY(float contentLine READ contentLine NOTIFY shapeChanged)
     Q_PROPERTY(QSizeF binSize READ binSize NOTIFY shapeChanged)
     /// The bin's rect in the host item's coordinates. The overlay has
@@ -41,46 +123,6 @@ class OozeEffect : public Effect
     Q_PROPERTY(float rimY READ rimY NOTIFY shapeChanged)
     Q_PROPERTY(float rimRadius READ rimRadius NOTIFY shapeChanged)
     Q_PROPERTY(QObject *iconTexture READ iconTexture NOTIFY shapeChanged)
-    /// The eyes, one entry each, only as many as are currently out.
-    ///
-    /// (x, y, z, radius) in bin-local units. Two consumers want this and
-    /// they want it in different places — qml/OozeEyes.qml puts a model
-    /// there, and the gel's vertex shader tents its surface up over it —
-    /// so it is computed once, here, against the same profile the mesh is
-    /// swept from. Working it out in QML was the earlier arrangement and
-    /// it could not answer the second question at all: the scene knows
-    /// where it PUT an eye, but not which way the gel faces there.
-    Q_PROPERTY(QVariantList eyeSpheres READ eyeSpheres NOTIFY frameChanged)
-    /// (x, y, z, open) — the gel's outward normal where each eye sits,
-    /// and how open that eye is, 0 shut to 1 wide. The scene leans a gaze
-    /// by the first and hands the second to the eyeball's own material,
-    /// which is where the lids are drawn.
-    Q_PROPERTY(QVariantList eyeNormals READ eyeNormals NOTIFY frameChanged)
-    /// WHERE THE POINTER IS, in the scene's own units, and how much the
-    /// eyes should care. The pair is what makes them follow it.
-    ///
-    /// A point rather than a direction, because the whole charm of a
-    /// cluster of eyes tracking something is that they CONVERGE on it: the
-    /// ones on the left and the ones on the right turn by different
-    /// amounts, and only a shared target produces that. Handing down one
-    /// direction would have them all swing in parallel, which reads as the
-    /// gel tilting rather than as being looked at.
-    ///
-    /// Placed on the pointer's view ray at a fixed distance in front of the
-    /// bin. Under an orthographic camera every point on that ray projects
-    /// to the same pixel, so the depth chosen does not change WHERE the
-    /// eyes appear to look — only how strongly they converge. See
-    /// kGazeDepth.
-    Q_PROPERTY(QVector3D gazeTarget READ gazeTarget NOTIFY frameChanged)
-    /// 0 when the pointer is nowhere near, 1 when it is on the bin.
-    ///
-    /// Faded by distance and then low-passed, because the host polls the
-    /// pointer every frame and always reports it present — the overlay is
-    /// click-through and gets no enter or leave events, so "present" says
-    /// nothing about whether it is anywhere near. Distance is the only
-    /// real signal, and a pointer that jumps across the screen has to
-    /// arrive as a movement rather than as a step.
-    Q_PROPERTY(float gazePull READ gazePull NOTIFY frameChanged)
     /// The scene camera's downward tilt, degrees. WRITTEN BY THE SCENE.
     ///
     /// Needed here because the pointer arrives as a position ON SCREEN and
@@ -143,8 +185,8 @@ public:
     float rimRadius() const { return m_shape.rimRadius(); }
     QObject *iconTexture() const;
 
-    QVariantList eyeSpheres() const { return m_eyeSpheres; }
-    QVariantList eyeNormals() const { return m_eyeNormals; }
+    /// Slot `i`, 0 to kMaxEyes - 1: the same object for the effect's life.
+    Q_INVOKABLE hyperbin::OozeEye *eye(int i) const;
     int maxEyes() const { return kMaxEyes; }
     QVector3D gazeTarget() const { return m_gazeTarget; }
     float gazePull() const { return m_gazePull; }
@@ -158,8 +200,10 @@ public:
     const OozeShape &shape() const { return m_shape; }
 
 signals:
-    /// Something that changes every step: the level and the clock.
-    void frameChanged();
+    /// Every step.
+    void timeChanged();
+    /// When the level moves, which a settled bin's does not.
+    void levelChanged();
     /// Something that changes only when the bin does.
     void shapeChanged();
 
@@ -222,8 +266,8 @@ private:
 
     OozeSim m_sim;
     OozeShape m_shape;
-    QVariantList m_eyeSpheres;
-    QVariantList m_eyeNormals;
+    OozeEye *m_eyes[kMaxEyes] {};
+    float m_lastLevel = -1.0f;
     /// The last spread, and what it was spread against.
     ///
     /// Where the eyes settle depends only on how many there are and on
@@ -242,6 +286,19 @@ private:
     QVector3D m_gazeTarget;
     float   m_gazePull = 0.0f;
     float   m_cameraTilt = 17.0f;
+    /// How hard an eye leans off its aim toward the way the gel faces
+    /// under it, at rest; halved while the pointer has its attention.
+    ///
+    /// At 0 every eye stares down the lens wherever it sits, which is why
+    /// the ones out near the silhouette read as decals: an eye buried in
+    /// something has an orbit, and an orbit points where the surface
+    /// points. At a third, one out on the side turned by only about thirty
+    /// degrees and still read as pasted on; over half turns it about fifty,
+    /// a ball sitting in the goo and looking out of it. Eased off while
+    /// tracking because at full strength a pointer swung across the bin
+    /// moved the irises by under a quarter of an eye's radius, which is in
+    /// the numbers and invisible on screen.
+    static constexpr float kGazeBias = 0.55f;
     /// How far in front of the bin the gaze target is parked, in bin
     /// heights. Only the CONVERGENCE depends on it — the camera is
     /// orthographic, so sliding the target along the pointer's view ray

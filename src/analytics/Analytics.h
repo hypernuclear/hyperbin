@@ -1,15 +1,14 @@
-// Usage analytics, ON by default and switchable off.
+// Usage analytics, OFF by default and switchable on.
 //
 // Off is the real thing: the SDK is not initialised, no device ID is
 // computed, and no request is made. The switch is in the menu bar next to
-// everything else the app can be told to stop doing, and once somebody
-// turns it off it stays off — the default only decides how an install
-// starts.
+// everything else the app can be told to do or stop doing, and in the
+// welcome window; whichever way somebody sets it, it stays — the default
+// only decides how an install starts.
 //
-// This was opt-in until 2026-08-18. Anywhere that requires consent before
-// non-essential analytics — the EU is the obvious one — an opt-out default
-// is not sufficient on its own, and the first-run disclosure has to carry
-// the consent instead.
+// Opt-in again after 1.2.0 (it was on by default from 2026-08-18 to 1.2.0).
+// That also settles consent where non-essential analytics needs it first,
+// the EU being the obvious case: nothing is sent until somebody says yes.
 //
 // What gets sent is deliberately thin — which effect is running, how
 // often the bin gets emptied, what platform this is. There is nothing

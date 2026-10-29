@@ -771,7 +771,7 @@ int main(int argc, char **argv)
 
     // --- analytics --------------------------------------------------------
     // Null when no app key was compiled in, which is every local build.
-    // On by default (src/analytics/Analytics.h); off means nothing is sent
+    // Off by default (src/analytics/Analytics.h); off means nothing is sent
     // at all. The switch is in the menu and in the welcome window.
     analytics = Analytics::create(&app);
     welcomeBridge.setAnalytics(analytics);

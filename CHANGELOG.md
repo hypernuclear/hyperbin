@@ -9,6 +9,10 @@ Entries are added under `[Unreleased]` as work lands on `main`. Cutting a
 release promotes that section to the new version and dates it.
 
 ## [Unreleased]
+- **Usage analytics are off by default again.** Nothing is sent unless you
+  switch on *Share Usage Data* in the menu or the welcome window. If you
+  switched it on before, it stays on; if you never touched it, it is now
+  off.
 
 ### Added
 

@@ -251,6 +251,11 @@ jobs:
           & "$env:QT_ROOT_DIR\bin\windeployqt.exe" --qmldir qml --compiler-runtime `
               --release --force build\Release\hyperbin.exe
           Copy-Item build\Release\* dist\windows\ -Recurse -Force
+          # The licences ship with the app (the macOS bundle carries the same
+          # three, CMakeLists.txt): MIT source, GPLv3 build. Staged here, so
+          # both the MSIX and the EXE installer get them.
+          New-Item -ItemType Directory -Path dist\windows\Licenses -Force | Out-Null
+          Copy-Item LICENSE, LICENSE-GPL-3.0.txt, THIRD-PARTY-NOTICES.md dist\windows\Licenses\ -Force
           Copy-Item packaging\windows\AppxManifest.xml dist\windows\ -Force
           Copy-Item packaging\windows\Assets dist\windows\Assets -Recurse -Force
 

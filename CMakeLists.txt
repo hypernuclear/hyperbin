@@ -556,6 +556,14 @@ if(APPLE)
     target_sources(hyperbin PRIVATE resources/hyperbin.icns)
     set_source_files_properties(resources/hyperbin.icns PROPERTIES
         MACOSX_PACKAGE_LOCATION "Resources")
+    # The licences travel inside the bundle, so the DMG and the copy Sparkle
+    # installs both carry them: the source is MIT, and a build against
+    # open-source Qt is GPLv3 (README, "Licence"). Windows stages the same
+    # three files in release.yml.
+    set(HYPERBIN_LICENCE_FILES LICENSE LICENSE-GPL-3.0.txt THIRD-PARTY-NOTICES.md)
+    target_sources(hyperbin PRIVATE ${HYPERBIN_LICENCE_FILES})
+    set_source_files_properties(${HYPERBIN_LICENCE_FILES} PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources/Licenses")
     target_link_libraries(hyperbin PRIVATE
         "-framework AppKit"
         "-framework ApplicationServices"

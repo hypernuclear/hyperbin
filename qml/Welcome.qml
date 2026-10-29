@@ -769,7 +769,7 @@ ApplicationWindow {
             Copy {
                 Layout.topMargin: 8
                 text: qsTr("hyperbin lives in your menu bar and is where you can configure your trash bin to your heart's content. ❤️ "
-                           + "Free and open source under the MIT license, made by your dear friends at hypernuclear. 😘")
+                           + "Free and open source (the code is MIT, the app is GPLv3), made by your dear friends at hypernuclear. 😘")
             }
 
             // --- the newsletter ------------------------------------------

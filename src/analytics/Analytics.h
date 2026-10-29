@@ -6,7 +6,7 @@
 // welcome window; whichever way somebody sets it, it stays — the default
 // only decides how an install starts.
 //
-// Opt-in again after 1.2.0 (it was on by default from 2026-08-18 to 1.2.0).
+// Opt-in again since 1.2.1 (it was on by default from 2026-08-18 to 1.2.0).
 // That also settles consent where non-essential analytics needs it first,
 // the EU being the obvious case: nothing is sent until somebody says yes.
 //

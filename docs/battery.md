@@ -33,18 +33,20 @@ actually matters (1) to optimise the thing that doesn't (4).
 - **Render on demand, never continuously.** Qt Quick only renders when
   the scene changes. We drive `update()` from an explicit timer, so
   frame rate is a number we choose, not whatever vsync gives us.
-- **20fps while active.** Insect motion is erratic and high-frequency;
-  low frame rate reads as "twitchy," which is *correct* for flies. This
-  is the rare case where the cheap option looks better. 30fps is the
-  ceiling if 20 ever looks wrong.
+- **At rest, stop the clock.** An effect that has settled (an ooze
+  puddle, flies that have landed and stopped) keeps its last frame on
+  screen and produces no new ones. The same goes once the pointer is on
+  the bin and the effect has finished reacting to it.
 - **Zero frames when the bin is empty.** No flies, no timer, no window.
   The overlay surface is destroyed, not hidden.
 - **Stop when nobody can see it**: display asleep, screen locked,
   session switched, a fullscreen app covering the target, the Dock
   auto-hidden, the desktop not the foreground (Windows).
-- **Run at the display's refresh rate**, and halve to 30fps when
+- **Run at the display's refresh rate**, and drop to 30fps when
   conserving. A 120Hz screen gets 120Hz; the old fixed 16ms cap meant it
-  did not. Frame cadence is still the dominant cost, which is why the
+  did not. The first budget was 20fps, on the theory that twitchy suits
+  flies; once there was something to look at it read as choppy, and it
+  went (`PowerPolicy.cpp`). Frame cadence is still the dominant cost, which is why the
   conserving path exists at all — users forgive a slower novelty, they do
   not forgive battery drain, and it is the top uninstall reason for this
   app class.
@@ -67,16 +69,17 @@ actually matters (1) to optimise the thing that doesn't (4).
 - **Small dirty region.** The overlay window is sized to the trash icon
   plus a flight margin, nothing more.
 
-The simulation itself — a dozen flies with wander/separation steering —
-is a few hundred floating point ops per frame. It will never be the
-bottleneck. Budget: **<0.1% CPU average, 0% when the bin is empty.**
+The fly simulation itself — at most six flies with wander/separation
+steering — is a few hundred floating point ops per frame. It will never
+be the bottleneck. Budget: **<0.1% CPU average, 0% when the bin is
+empty.** That is a target; what has been measured is at the end.
 
 `PowerPolicy` in `src/core/` owns all of this so the rules live in one
 place rather than being scattered through the render path.
 
 ## Measuring, not guessing
 
-Every claim above needs verifying on real hardware before we ship:
+How to check every claim above on real hardware:
 
 - macOS: `powermetrics --samplers cpu_power,gpu_power` and Activity
   Monitor's Energy tab (the "Preventing Sleep" and "App Nap" columns).
@@ -85,3 +88,14 @@ Every claim above needs verifying on real hardware before we ship:
 
 Target: hyperbin does not appear in the top-20 energy consumers with a
 full bin, and is indistinguishable from not running with an empty one.
+
+## Measured
+
+<!-- MEASURED (HYP-325): real-Dock runs go here. Per effect, full bin,
+Dock at its default size: machine, OS version, refresh rate, CPU % and
+energy impact, at full rate and with Low Power Mode on; plus an empty
+bin and a hidden Dock. Windows the same, if measured. -->
+
+Not yet measured on a real Dock. The only figures so far come from the
+preview window, at a far larger size than the Dock ever draws, where
+Ooze runs about 1.3x the flies.

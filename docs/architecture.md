@@ -1,107 +1,113 @@
-# hyperbin — architecture and plan
+# hyperbin — architecture
 
-Free giveaway app: animated flies swarm the Trash / Recycle Bin as it
-fills. macOS + Windows, Qt 6.11, direct download only.
+Free app: an animated effect (flies, ooze or tentacles) grows on the
+macOS Trash or the Windows Recycle Bin as it fills, and leaves when it is
+emptied. macOS + Windows, Qt 6.11, direct download only.
 
 ## Decisions
 
-**Direct download only, no app stores.** Dropped on purpose. The Mac App
-Store sandbox blocks every leg of this app (no `~/.Trash` access, no
-Accessibility API for Dock geometry), so a MAS build couldn't do the
-core feature. Microsoft Store via full-trust MSIX would work, but a
-lead magnet on a store is a funnel with the bottom cut off — the store
-owns the customer, so no email address and no attribution. Reuse
-our own Developer ID + notarization + Sparkle pipeline instead and gate
-the download on an email.
+**Direct download only, no app stores.** The Mac App Store sandbox blocks
+every leg of this app (no `~/.Trash` access, no Accessibility API for
+Dock geometry), so a MAS build couldn't do the core feature. Microsoft
+Store via full-trust MSIX would work, but the store would own the
+customer and the attribution. So it reuses our own Developer ID +
+notarization + Sparkle pipeline on macOS and a signed installer + MSIX
+with WinSparkle on Windows (`distribution.md`). The download is a plain
+link: no email gate, no account. The welcome window offers the
+newsletter; nothing depends on it.
 
-**Qt licensing: LGPL is fine here.** Since we're not shipping to stores,
-LGPL v3 works — dynamic-link the Qt libraries and provide relinking
-info. That sidesteps any question about commercial seat coverage. Worth
-confirming with Qt sales anyway, but hyperbin doesn't have to block on
-the answer.
+**Licensing: source MIT, release binaries GPLv3.** This first said "LGPL
+is fine", which stopped being true the day the ooze arrived: Qt Quick 3D
+is GPLv3 or commercial, with no LGPL option, and the ooze and tentacles
+are Quick3D scenes. Release CI installs open-source Qt, so the binaries
+we ship are GPLv3, while everything in this repository stays MIT.
+Publishing the source meets the GPL's source obligation. A build against
+commercial Qt carries no such obligation. Detail per module in
+`THIRD-PARTY-NOTICES.md`.
 
 **Procedural simulation, not Rive.** Fly motion is emergent, not
 authored. Steering behaviours produce better flies in ~200 lines than
 keyframed loops would, and respond continuously to fullness rather than
 cutting between discrete states. Rive earns its place when a designer
-authors the motion; revisit if we add a character. `RiveQtQuickPlugin`
-stays available if that changes.
+authors the motion; revisit if we add a character.
 
 **Neither shaders nor Rive is the power lever** — see `battery.md`. At
-128×128 the fill cost is irrelevant; frame cadence and idle behaviour
-are everything. A fragment shader at vsync would be *worse* than a CPU
-sim at 20fps. So: render on demand at 20fps, zero frames when the bin is
-empty, stop when occluded or on low power.
+icon size the fill cost is irrelevant; frame cadence and idle behaviour
+are everything. So: render on demand from an explicit clock, at the
+display's refresh rate or 30fps when conserving; stop the clock when the
+effect is at rest; zero frames and no window when the bin is empty; stop
+whenever nobody can see the bin.
 
 ## Shape
 
 ```
-src/core/       FlySim (steering sim), PowerPolicy (when/how fast to draw)
-src/platform/   TrashTarget interface + per-OS impls + a stub
-src/render/     FlyItem — one batched QSGGeometryNode, one draw call
-qml/            Main.qml: overlay window, tray UI, onboarding
+src/core/       simulations (FlySim, OozeSim, TentacleChain), the Effect
+                contract and registry, PowerPolicy (when/how fast to draw)
+src/effects/    Flies (one batched scene-graph node), Ooze and Tentacles
+                (Qt Quick 3D scenes)
+src/render/     EffectItem: clocks the current effect and hands it the
+                bin's geometry, artwork and silhouette
+src/platform/   TrashTarget + DockTrashTarget (macOS) / RecycleBinTarget
+                (Windows) / a stub; overlays, Low Power, launch at login
+src/update/     Sparkle / WinSparkle behind one AppUpdater
+src/analytics/  Countly, on by default, switchable off
+qml/            splash, permissions, welcome window, the 3D scenes
 ```
 
-`TrashTarget` is the entire platform boundary: icon rect, item count,
-status, remediation. Everything above it is shared — realistically
-~75–80% of the code.
+`TrashTarget` is the entire platform boundary: icon rect, count and
+size, status, remediation. Everything above it is shared — realistically
+~75–80% of the code. A new effect implements `Effect` and adds one line
+to `EffectRegistry.cpp` (`effects.md`).
 
-## Status
+## Status (1.2.0, Oct 2026)
 
-Done and building:
-- `FlySim` — wander + bin containment + separation + darts, deterministic
-- `PowerPolicy` — all render-gating rules in one testable place
-- `FlyItem` — batched scene-graph rendering, explicit frame clock
-- `StubTrashTarget` — fake geometry cycling fullness, so the sim is
-  developable before either native backend exists
-- `tests/flies/` — populates, moves, stays over the bin, scales,
-  fully disperses when emptied
-
-Verified: builds clean on macOS, runs 4s without crashing, sim test
-passes. Measured swarm bbox 172×187px at fullness 1, which set the
-overlay margin to 95px.
+Shipped:
+- **Both backends.**
+  - macOS (`DockTrashTarget`): the Trash `AXDockItem` through the
+    Accessibility API, polled at 16ms while on screen so it follows Dock
+    magnification, 1s when hidden. `~/.Trash` is sized with a directory
+    walk at about 1Hz, which needs Full Disk Access.
+  - Windows (`RecycleBinTarget`): count and size from
+    `SHQueryRecycleBin`, change events from `SHChangeNotifyRegister`,
+    the icon rect from `IShellWindows` → `IFolderView2::GetItemPosition`.
+    Not `LVM_GETITEMPOSITION`, which needs `ReadProcessMemory` inside
+    explorer.exe — the heuristic that gets an unknown signed download
+    quarantined. See `windows-backend.md`.
+- **Overlays.** macOS: an `NSWindow` above `kCGDockWindowLevel`,
+  click-through, on every Space. Windows is **not** parented into the
+  desktop layer: `SetParent` under `Progman`/`WorkerW` puts the overlay
+  behind the icons permanently, which kills the in-front batch, the
+  landings on the front of the bin, and the 4:1 front/behind split. It is
+  topmost + click-through, hidden whenever the desktop is not actually
+  visible at the bin — which also covers full-screen apps and games.
+- **Three effects**: Flies, Ooze (with eyes that follow the pointer) and
+  Tentacles, one at a time, with an amount and a threshold from the
+  menu.
+- **Power**: `PowerPolicy` gates every frame; Low Power Mode is On / Off
+  / Auto, and Auto follows the OS.
+- **Onboarding**: a permissions window on macOS explains Accessibility
+  and Full Disk Access before asking; a hidden Recycle Bin on Windows is
+  detected (`HideDesktopIcons`, watched) and surfaced in the tray with a
+  line that opens Desktop Icon Settings, deliberately not changed for
+  the user. A welcome window says what the app does, with switches for
+  Open at Login and usage data.
+- **Tests** under `tests/` for the flies, ooze, tentacles, settings and
+  links.
 
 ## Next
 
-1. **`DockTrashTarget` (macOS).** `AXUIElementCreateApplication` on the
-   Dock pid → find the Trash `AXDockItem` → `kAXPositionAttribute` /
-   `kAXSizeAttribute`. Needs the Accessibility permission; onboarding
-   must explain it before triggering the prompt. Item count from
-   `~/.Trash` + per-volume `/.Trashes/<uid>` via FSEvents.
-2. ~~**`RecycleBinTarget` (Windows).**~~ Built — see
-   `docs/windows-backend.md`. Count and size come from
-   `SHQueryRecycleBin` and change events from `SHChangeNotifyRegister`,
-   as planned. The icon rect does **not** use `LVM_GETITEMPOSITION`:
-   that needs `ReadProcessMemory` inside explorer.exe, which is the
-   heuristic that gets an unknown signed download quarantined. It uses
-   `IShellWindows` → `IFolderView2::GetItemPosition` instead —
-   documented, injection-free, and it reports the icon size too.
-3. ~~**Overlay z-order.**~~ Built. macOS: `NSWindow` level above
-   `kCGDockWindowLevel`. Windows is **not** parented into the desktop
-   layer: `SetParent` under `Progman`/`WorkerW` puts the overlay behind
-   the icons permanently, which kills the in-front batch, the landings
-   on the front of the bin, and the 4:1 front/behind split. It is
-   topmost + click-through, hidden whenever the desktop is not actually
-   visible at the bin — which also covers full-screen apps and games for
-   free.
-4. **Onboarding.** A hidden Recycle Bin is detected
-   (`HKCU\...\HideDesktopIcons\NewStartPanel`, CLSID
-   `{645FF040-5081-101B-9F08-00AA002F954E}`, watched with
-   `RegNotifyChangeKeyValue`) and surfaced in the tray with a line that
-   opens Desktop Icon Settings. Deliberately not written for the user.
-   Still to do: the first-run walkthrough itself, and explaining
-   Accessibility on macOS before prompting.
-5. **Power verification** on real hardware — `powermetrics` /
-   PowerCfg. Non-negotiable before ship.
-6. **Art.** Swap the vertex-coloured quads for a textured sprite atlas;
-   the geometry layout already supports it.
+- **Measure power on a real Dock** (`battery.md`, *Measured*). So far
+  energy has only been measured in the preview window.
+- **Other volumes.** Only `~/.Trash` is counted; items trashed from
+  `/Volumes/<x>/.Trashes/<uid>` are not.
+- **`AXObserver` instead of polling** the Dock item, so revealing an
+  auto-hidden Dock is immediate and cheaper.
 
 ## Open risks
 
 - **Windows may have no canvas.** Many Win11 users run a bare desktop,
-  and the Recycle Bin can be hidden or dragged anywhere. Decide whether
-  the Windows build degrades to a floating desktop companion when the
-  icon can't be found.
+  and the Recycle Bin can be hidden or dragged anywhere. A hidden bin is
+  detected and explained; there is no fallback that draws without it.
 - ~~The Explorer memory-read technique is the single biggest unknown in
   the project.~~ Retired: nothing reads explorer's memory. `IFolderView2`
   gives the same numbers through a documented interface. What it costs

@@ -287,41 +287,54 @@ forces it, which is how the prompt flow gets tested.
 - **Energy is measured only in the preview**, at a far larger size than
   the Dock ever draws. Ooze runs about 1.3x the flies there; at icon size
   the gap should close, but that has not been checked on a real Dock.
+  <!-- MEASURED (HYP-325): replace this item with the real-Dock numbers
+  from docs/battery.md, "Measured". -->
 
 ## Layout
 
 ```
 src/core/       platform-agnostic: simulations, the Effect contract,
                 the effect registry, the power policy
-src/effects/    one directory per effect's implementation
-src/platform/   the ~20% that differs: TrashTarget + overlay surface
+src/effects/    Flies, Ooze and Tentacles: one Effect each
+src/platform/   the ~20% that differs: TrashTarget + overlay surface,
+                Low Power, launch at login
 src/render/     EffectItem, the host that clocks an effect and hands it
                 the bin's geometry, artwork and silhouette
+src/app/        settings, the tray menu, the welcome window's bridge
 src/update/     Sparkle (macOS) and WinSparkle (Windows), behind one
                 AppUpdater interface; a null one everywhere else
 src/analytics/  Countly reporting (on by default, switchable off),
                 behind one Analytics interface
 packaging/      Windows installer + MSIX manifest, macOS DMG artwork
-shaders/        fly mask (baked .qsb) and the ooze's Quick3D snippets
-qml/            tray glyph and the ooze's Quick3D scene
+shaders/        fly mask (baked .qsb), the ooze, eye and tentacle
+                Quick3D shaders, the welcome window's button
+qml/            splash, permissions, welcome window, tray glyph, and the
+                ooze and tentacle Quick3D scenes
 docs/           architecture, the effect contract, battery, Windows,
                 distribution
 ```
-hyperbin's own source — everything under `src/`, `qml/`, `shaders/` and
-`tests/` — is **MIT**. See `LICENSE`.
-What the *binary* may be distributed under is a separate question, and it is
-decided by which Qt it was linked against rather than by anything in this
-repository:
-* **Open-source Qt** — the binary must be distributed under **GPLv3**. Qt
-  Quick 3D is GPLv3-or-commercial with no LGPLv3 option, and the ooze and
-  the tentacles are both Quick3D scenes. This repository being public
-  satisfies the matching source obligation.
-* **Commercial Qt** — that obligation does not arise, and the binary can be
+
+## Licence
+
+**The source is MIT; the release builds are GPLv3.**
+
+Everything in this repository — `src/`, `qml/`, `shaders/`, `tests/` — is
+**MIT**. See `LICENSE`.
+
+The apps you download from hypernuclear.com are built against open-source
+Qt, and the ooze and tentacles are Qt Quick 3D scenes. Qt Quick 3D is
+GPLv3 or commercial, with no LGPL option, so **those binaries are
+distributed under GPLv3**. This repository is their corresponding source.
+
+That is a property of Qt, not of this project, and it follows the build,
+not the repo:
+
+* **Built against open-source Qt** (as the releases are), the binary is
+  GPLv3.
+* **Built against commercial Qt**, it isn't, and the binary can be
   distributed on whatever terms you choose.
-So cloning this and building it with an open-source Qt gives you a
-GPLv3-encumbered binary even though the source is MIT. That is a property of
-Qt, not of this project.
+
 `THIRD-PARTY-NOTICES.md` has the per-module detail and covers Sparkle,
-WinSparkle, the Countly SDK and the Satoshi typeface (fetched at build
-time, never committed).
+WinSparkle, the Countly SDK, the Satoshi typeface (fetched at build time,
+never committed) and the simplex noise in the welcome window's button.
 

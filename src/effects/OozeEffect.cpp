@@ -6,10 +6,87 @@
 
 namespace hyperbin {
 
+namespace {
+// A stable per-eye value in [0,1): same arguments, same number, every
+// frame, so an eye keeps its saccade instead of being re-rolled. In double,
+// as the scene's JavaScript had it, so the eyes dart exactly where they did.
+double eyeRnd(double a, double b)
+{
+    const double s = std::sin(a * 127.1 + b * 311.7) * 43758.5453;
+    return s - std::floor(s);
+}
+
+constexpr float kDeg = 180.0f / 3.14159265f;
+} // namespace
+
+OozeEye::OozeEye(int index, QObject *parent)
+    : QObject(parent)
+    , m_lidRoll(float((eyeRnd(index, 37) - 0.5) * 0.9))
+    , m_seed(float(index) * 7.31f)
+{
+}
+
+void OozeEye::hide()
+{
+    if (!m_out)
+        return;
+    m_out = false;
+    emit outChanged();
+    emit sphereChanged();
+}
+
+void OozeEye::show(const QVector3D &position, float size, const QVector3D &gaze,
+                   float dartX, float dartY, float open)
+{
+    const bool wasOut = m_out;
+    bool sphere = !wasOut;
+    m_out = true;
+    if (m_position != position) {
+        m_position = position;
+        sphere = true;
+        emit positionChanged();
+    }
+    if (!qFuzzyCompare(m_size, size)) {
+        m_size = size;
+        sphere = true;
+        emit sizeChanged();
+    }
+    if (m_gaze != gaze) {
+        m_gaze = gaze;
+        // Yaw then pitch, nested in the scene rather than one node's
+        // eulerRotation: which order Qt composes a pair of Euler angles in
+        // is a thing to look up and get wrong, and nesting says it outright.
+        //   Ry(yaw) * Rx(pitch) * +z  =  (sin y cos p, -sin p, cos y cos p)
+        m_yaw = std::atan2(gaze.x(), gaze.z()) * kDeg;
+        m_pitch = -std::asin(std::clamp(gaze.y(), -1.0f, 1.0f)) * kDeg;
+        emit gazeChanged();
+    }
+    if (m_dartX != dartX || m_dartY != dartY) {
+        m_dartX = dartX;
+        m_dartY = dartY;
+        emit dartChanged();
+    }
+    if (m_open != open) {
+        m_open = open;
+        emit openChanged();
+    }
+    if (!wasOut)
+        emit outChanged();
+    if (sphere)
+        emit sphereChanged();
+}
+
 OozeEffect::OozeEffect(QObject *parent)
     : Effect(parent)
     , m_iconTexture(new IconTexture)
 {
+    for (int i = 0; i < kMaxEyes; ++i)
+        m_eyes[i] = new OozeEye(i, this);
+}
+
+OozeEye *OozeEffect::eye(int i) const
+{
+    return i >= 0 && i < kMaxEyes ? m_eyes[i] : nullptr;
 }
 
 OozeEffect::~OozeEffect()
@@ -163,7 +240,11 @@ void OozeEffect::step(float dt)
     // Before the eyes: where they look is part of where they are.
     updateGaze(dt);
     updateEyes();
-    emit frameChanged();
+    emit timeChanged();
+    if (m_sim.level() != m_lastLevel) {
+        m_lastLevel = m_sim.level();
+        emit levelChanged();
+    }
 
     const bool empty = isEmpty();
     if (empty != m_wasEmpty) {
@@ -375,8 +456,6 @@ static float eyeHash(float a, float b)
 
 void OozeEffect::updateEyes()
 {
-    m_eyeSpheres.clear();
-    m_eyeNormals.clear();
 
     // How many are out, and it is NOT proportional to the level.
     //
@@ -405,6 +484,8 @@ void OozeEffect::updateEyes()
     const int n = m_sim.isEmpty() ? 0 : qBound(1, want, kMaxEyes);
     const float t = m_sim.time();
     const float binW = float(m_binSize.width());
+    const float tilt = m_cameraTilt / kDeg;
+    const QVector3D camDir(0.0f, std::sin(tilt), std::cos(tilt));
 
     // Placed first, spread second, seated third. The spreading has to see
     // all of them at once, so it cannot happen inside the loop that makes
@@ -597,10 +678,44 @@ void OozeEffect::updateEyes()
             open = o * o * (3.0f - 2.0f * o);
         }
 
-        m_eyeSpheres.append(
-            QVariant::fromValue(QVector4D(seat.pos + seat.nrm * proud, radius)));
-        m_eyeNormals.append(QVariant::fromValue(QVector4D(seat.nrm, open)));
+        const QVector3D pos = seat.pos + seat.nrm * proud;
+
+        // --- the gaze ------------------------------------------------------
+        //
+        // What it would look at with no pointer about: the lens. The camera
+        // is orthographic, so that is one direction for every eye. And what
+        // it looks at when there is one: the pointer, which is a POSITION,
+        // so each eye gets its own direction and the cluster converges.
+        // That difference is the whole effect: parallel gazes read as the
+        // gel tilting, converging ones as being looked at.
+        QVector3D toPointer = m_gazeTarget - pos;
+        toPointer = toPointer.length() > 0.001f ? toPointer.normalized() : camDir;
+        const QVector3D aim =
+            (camDir * (1.0f - m_gazePull) + toPointer * m_gazePull).normalized();
+        // Somewhere between that and the way the gel faces here (kGazeBias).
+        // The pull is never all the way, as on the tentacles: a little of the
+        // resting pose stops fourteen eyes locking into one dead stare.
+        const float bias = kGazeBias * (1.0f - 0.5f * m_gazePull);
+        const QVector3D gaze = (aim * (1.0f - bias) + seat.nrm * bias).normalized();
+
+        // The saccade. floor(time) picks a fixation and the fixation is
+        // hashed into an offset, so the eye holds still and then jumps: a
+        // saccade is close to instantaneous, so easing it would look like
+        // something searching, and snapping looks like something watching.
+        // About one fixation in four lands on the camera, which is what
+        // sells the rest. Damped while the pointer has their attention: at
+        // full size on top of tracking an eye jitters round what it is
+        // locked on and reads as struggling to focus.
+        const double fix = std::floor(double(t) * 1.6 + fi * 3.7);
+        const bool blank = eyeRnd(fix, fi) > 0.72;
+        const float dart = 1.0f - m_gazePull * 0.85f;
+        const float dartX = blank ? 0.0f : float((eyeRnd(fix, fi + 11) - 0.5) * 26.0) * dart;
+        const float dartY = blank ? 0.0f : float((eyeRnd(fix, fi + 23) - 0.5) * 34.0) * dart;
+
+        m_eyes[i]->show(pos, radius, gaze, dartX, dartY, open);
     }
+    for (int i = n; i < kMaxEyes; ++i)
+        m_eyes[i]->hide();
 }
 
 } // namespace hyperbin

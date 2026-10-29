@@ -14,6 +14,12 @@ release promotes that section to the new version and dates it.
 
 ### Changed
 
+### Fixed
+
+## [1.2.1] - 2026-10-29
+
+### Changed
+
 - **Usage analytics are off by default again.** Nothing is sent unless you
   switch on *Share Usage Data* in the menu or the welcome window. If you
   switched it on before, it stays on; if you never touched it, it is now
@@ -26,8 +32,6 @@ release promotes that section to the new version and dates it.
   installer and MSIX carry LICENSE (MIT, the source), the GPLv3 (the
   builds, which link Qt Quick 3D) and THIRD-PARTY-NOTICES.md. The welcome
   window says the same instead of only "MIT".
-
-### Fixed
 
 ## [1.2.0] - 2026-10-18
 

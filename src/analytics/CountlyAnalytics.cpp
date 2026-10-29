@@ -24,7 +24,7 @@ CountlyAnalytics::CountlyAnalytics(const QString &appKey, const QString &serverU
     // stored value, not by first-run code that might not run. The switch
     // writes through to this key, so whoever turns it on stays on and
     // whoever turned it off stays off. Installs that never touched it
-    // (1.1.0-1.2.0 started on) start off from this version.
+    // (1.1.0-1.2.0 started on) start off from 1.2.1.
     m_enabled.store(m_store.value(QStringLiteral("analyticsEnabled"), false).toBool());
 
     // Bring the SDK up here when the user opted in on a previous run.

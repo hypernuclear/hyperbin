@@ -213,7 +213,7 @@ what every local build does.
 
 ## Analytics, and what is actually collected
 
-Off by default (opt-in again after 1.2.0; it was on by default from
+Off by default (opt-in again since 1.2.1; it was on by default from
 2026-08-18 to 1.2.0), and off means the SDK is never initialised, no
 device id is computed, and no request is made.
 Verified by running a build with a real app key against a local HTTP

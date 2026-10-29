@@ -36,6 +36,12 @@ The distinction is about the build, not the repo. A third party who clones
 this and builds it with open-source Qt produces a GPLv3-encumbered binary
 even though this source is MIT.
 
+**The official releases are in that position.** Release CI installs
+open-source Qt (`jurplel/install-qt-action`, which uses aqtinstall:
+`.github/workflows/release.yml`), so the binaries published on
+hypernuclear.com are distributed under GPLv3, with this repository as
+their corresponding source.
+
 ## Bundled and linked components
 
 | Component | Licence | How it arrives |

@@ -9,14 +9,19 @@ Entries are added under `[Unreleased]` as work lands on `main`. Cutting a
 release promotes that section to the new version and dates it.
 
 ## [Unreleased]
-- **Usage analytics are off by default again.** Nothing is sent unless you
-  switch on *Share Usage Data* in the menu or the welcome window. If you
-  switched it on before, it stays on; if you never touched it, it is now
-  off.
 
 ### Added
 
 ### Changed
+
+- **Usage analytics are off by default again.** Nothing is sent unless you
+  switch on *Share Usage Data* in the menu or the welcome window. If you
+  switched it on before, it stays on; if you never touched it, it is now
+  off.
+- **Ooze uses about a fifth less CPU.** Its eyes are worked out in C++
+  instead of in QML bindings that re-ran every frame: measured at a 95Hz
+  refresh rate, 25% of a core became about 20%. Tentacles signal their
+  level and count only when they change.
 
 ### Fixed
 

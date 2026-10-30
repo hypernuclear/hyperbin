@@ -4,6 +4,13 @@ Your Trash, but haunted. hyperbin draws an animated effect over the macOS
 Trash or the Windows Recycle Bin, and the effect intensifies as the bin fills. It's a "gentle" reminder to empty it. 😉 Empty the bin and the effect
 disappears.
 
+**[Get hyperbin free at hypernuclear.com/hyperbin](https://hypernuclear.com/hyperbin?ref=github)**, for macOS and Windows.
+
+https://github.com/user-attachments/assets/9b96685a-86d5-452b-864e-75006f0043cf
+
+<sub>THE BIN, a Halloween short. The Dock shots are the real app (*actual
+app footage); the rest is a film.</sub>
+
 ![Flies, Ooze and Tentacles on the Windows Recycle Bin and the macOS Trash](docs/media/hyperbin.webp)
 
 <sub>The three effects from the live demo on
@@ -23,6 +30,9 @@ has to be from the menu-bar or tray item.
 Made by [hypernuclear](https://hypernuclear.com/?ref=github).
 
 ## Download & docs
+
+Get it from [hypernuclear.com/hyperbin](https://hypernuclear.com/hyperbin?ref=github),
+or download the newest build directly:
 
 | Platform | Download |
 | -- | -- |
